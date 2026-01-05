@@ -3,13 +3,17 @@ import json
 import csv
 from openai import OpenAI
 import argparse
+import numpy as np
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # Using hardcoded values to allow quick local execution without environment variables
 API_KEY = "sk-NMqHr2L2nqIOyZFgynUR9w"
 BASE_URL = "http://34.72.104.120"
-file_name = "qc_data.csv"
+# CSV file name (shared across all taxonomies)
+file_name = "data.csv"
 
-# CSV file names
+# CSV file path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 file_path = os.path.join(SCRIPT_DIR, file_name)
 
@@ -18,6 +22,11 @@ client = OpenAI(
     api_key=API_KEY,
     base_url=BASE_URL,
     )
+
+# Initialize embedding model for similarity calculation
+print("Loading embedding model...")
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+print("Embedding model loaded.")
 
 # Extract criteria design rules as separate constant (used in both initial and refinement)
 CRITERIA_DESIGN_RULES = """
@@ -385,18 +394,152 @@ def create_refinement_feedback(data_qc, criteria_failures, judge_responses, nemo
     
     return feedback
 
-# ---------------- CSV SETUP -----------------
-# If CSV doesn't exist, create it with headers
-if not os.path.exists(file_path):
-    with open(file_path, mode='w', newline='', encoding='utf-8') as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=[
-            "prompt", "correct_response", "response_reference",
-            "model", "nemotron_response", "judge_response", "status"
-        ])
-        writer.writeheader()
-    print(f"{file_name} created successfully!")
-else:
-    print(f"{file_name} already exists.")
+# ---------------- EMBEDDING FUNCTIONS -----------------
+def get_prompt_embedding(prompt):
+    """
+    Generate embedding for a prompt using the embedding model.
+    
+    Args:
+        prompt: The prompt text to embed
+    
+    Returns:
+        list: Embedding vector as a list (for JSON serialization)
+    """
+    embedding = embedding_model.encode(prompt)
+    return embedding.tolist()  # Convert numpy array to list for JSON
+
+def load_existing_embeddings_from_csv(file_path):
+    """
+    Load embeddings from CSV file.
+    Reads the 'embedding' column and parses JSON arrays back to numpy arrays.
+    
+    Args:
+        file_path: Path to the CSV file
+    
+    Returns:
+        list: List of numpy arrays (embeddings)
+    """
+    embeddings = []
+    
+    if os.path.exists(file_path):
+        with open(file_path, 'r', encoding='utf-8') as csv_file:
+            reader = csv.DictReader(csv_file)
+            for row in reader:
+                embedding_json = row.get('embedding', '')
+                if embedding_json:
+                    try:
+                        embedding_list = json.loads(embedding_json)
+                        embeddings.append(np.array(embedding_list))
+                    except (json.JSONDecodeError, ValueError):
+                        # Skip invalid embeddings
+                        continue
+    
+    return embeddings
+
+def calculate_max_similarity(new_embedding, existing_embeddings):
+    """
+    Calculate maximum cosine similarity between new embedding and all existing embeddings.
+    
+    Args:
+        new_embedding: New embedding as numpy array or list
+        existing_embeddings: List of existing embeddings (numpy arrays)
+    
+    Returns:
+        float: Maximum similarity score (0.0 to 1.0)
+    """
+    if not existing_embeddings:
+        return 0.0  # No existing prompts, similarity is 0
+    
+    # Convert new_embedding to numpy array if it's a list
+    new_emb = np.array(new_embedding) if isinstance(new_embedding, list) else new_embedding
+    
+    # Calculate cosine similarity with all existing embeddings
+    similarities = []
+    for existing_emb in existing_embeddings:
+        similarity = cosine_similarity([new_emb], [existing_emb])[0][0]
+        similarities.append(similarity)
+    
+    return max(similarities) if similarities else 0.0
+
+# ---------------- TAXONOMY SELECTION -----------------
+def select_taxonomy():
+    """
+    Interactive prompt for taxonomy selection with clear options.
+    
+    Displays available taxonomies and prompts user to select one.
+    Shows clear options with numbers and descriptions.
+    Validates input and shows error if invalid.
+    
+    Returns:
+        str: Taxonomy identifier ("qc" for Question Correction)
+    """
+    # Define available taxonomies
+    taxonomies = {
+        "1": {
+            "id": "qc",
+            "name": "Question Correction (QC)",
+            "description": "Questions containing logical fallacies, factual errors, or inconsistencies where all provided options are incorrect"
+        }
+        # Future taxonomies will be added here:
+        # "2": {
+        #     "id": "itf",
+        #     "name": "Intentional Textual Flaws (ITF)",
+        #     "description": "Texts with intentional errors that models must identify"
+        # },
+        # "3": {
+        #     "id": "mim",
+        #     "name": "Misleading Instructions (MIM)",
+        #     "description": "Instructions designed to mislead models"
+        # }
+    }
+    
+    # Display header
+    print("\n" + "="*70)
+    print(" " * 20 + "TAXONOMY SELECTION")
+    print("="*70)
+    print()
+    
+    # Display all available taxonomies
+    print("Available Taxonomies:")
+    print("-" * 70)
+    
+    for num, taxonomy in taxonomies.items():
+        print(f"  [{num}] {taxonomy['name']}")
+        print(f"      {taxonomy['description']}")
+        print()
+    
+    print("="*70)
+    
+    # Get user input
+    while True:
+        try:
+            choice = input("Enter taxonomy number (default: 1): ").strip()
+            
+            # Default to Question Correction if empty
+            if choice == "":
+                choice = "1"
+            
+            # Validate choice
+            if choice in taxonomies:
+                selected = taxonomies[choice]
+                print(f"\n{'='*70}")
+                print(f"✓ Selected Taxonomy: {selected['name']}")
+                print(f"{'='*70}\n")
+                return selected["id"]
+            else:
+                print(f"\n❌ ERROR: Invalid selection '{choice}'")
+                print(f"   Available options: {', '.join(taxonomies.keys())}")
+                print(f"   Default: 1 (Question Correction)")
+                print(f"\n   Please run the script again with a valid selection.\n")
+                exit(1)
+                
+        except KeyboardInterrupt:
+            print("\n\n⚠️  Interrupted by user. Exiting...")
+            exit(0)
+        except Exception as e:
+            print(f"\n❌ Error: {e}")
+            print("   Please run the script again.\n")
+            exit(1)
 
 # ---------------- CLI ARGUMENT SETUP -----------------
 # Parse command-line arguments to control how many times
@@ -419,7 +562,33 @@ parser.add_argument(
 args = parser.parse_args()
 
 RUNS = args.runs
-MAX_ITERATIONS = args.max_iterations    
+MAX_ITERATIONS = args.max_iterations
+
+# Select taxonomy (interactive prompt)
+TAXONOMY = select_taxonomy()
+
+# Based on selected taxonomy, configure system prompt
+if TAXONOMY == "qc":
+    SYSTEM_PROMPT = SYSTEM_PROMPT_QC
+else:
+    # Future: Add other taxonomies here
+    # For now, default to QC
+    SYSTEM_PROMPT = SYSTEM_PROMPT_QC
+
+# ---------------- CSV SETUP -----------------
+# If CSV doesn't exist, create it with headers
+# Note: All taxonomies use the same CSV file (data.csv) with taxonomy field
+if not os.path.exists(file_path):
+    with open(file_path, mode='w', newline='', encoding='utf-8') as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=[
+            "taxonomy", "prompt", "correct_response", "response_reference",
+            "model", "nemotron_response", "judge_response", "status",
+            "embedding", "max_similarity"
+        ])
+        writer.writeheader()
+    print(f"{file_name} created successfully!")
+else:
+    print(f"{file_name} already exists.")
 
 for run_idx in range(RUNS):
     print(f"\n========== RUN {run_idx + 1}/{RUNS} ==========")
@@ -442,7 +611,7 @@ for run_idx in range(RUNS):
             if iteration == 1:
                 # First iteration: Generate new prompt
                 print("Layer 1: Generating initial prompt...")
-                agent01_input = SYSTEM_PROMPT_QC
+                agent01_input = SYSTEM_PROMPT
             else:
                 # Later iterations: Refine with feedback
                 print(f"Layer 1: Refining prompt (iteration {iteration})...")
@@ -587,15 +756,34 @@ for run_idx in range(RUNS):
                 print(f"   Saving to CSV...")
                 print(f"{'='*60}\n")
                 
+                # Generate embedding for the new prompt
+                print("Generating embedding for prompt...")
+                new_prompt = data_qc.get("prompt", "")
+                new_embedding_list = get_prompt_embedding(new_prompt)
+                
+                # Load existing embeddings from CSV
+                print("Loading existing embeddings from CSV...")
+                existing_embeddings = load_existing_embeddings_from_csv(file_path)
+                
+                # Calculate max similarity with existing prompts
+                if existing_embeddings:
+                    max_similarity = calculate_max_similarity(new_embedding_list, existing_embeddings)
+                    print(f"Max similarity with existing prompts: {max_similarity:.4f}")
+                else:
+                    max_similarity = 0.0
+                    print("No existing prompts found. Similarity: 0.0")
+                
                 # Save to CSV
                 with open(file_path, mode='a', newline='', encoding='utf-8') as csv_file:
                     writer = csv.DictWriter(csv_file, fieldnames=[
-                        "prompt", "correct_response", "response_reference",
-                        "model", "nemotron_response", "judge_response", "status"
+                        "taxonomy", "prompt", "correct_response", "response_reference",
+                        "model", "nemotron_response", "judge_response", "status",
+                        "embedding", "max_similarity"
                     ])
                     
                     writer.writerow({
-                        "prompt": data_qc.get("prompt", ""),
+                        "taxonomy": TAXONOMY,  # Store selected taxonomy
+                        "prompt": new_prompt,
                         "correct_response": data_qc.get("correct_response", ""),
                         "response_reference": json.dumps(data_qc.get("response_reference", [])),
                         "model": "openrouter/nvidia/nemotron-3-nano-30b-a3b",
@@ -610,7 +798,9 @@ for run_idx in range(RUNS):
                                 "status": individual_statuses[i]
                             } for i in range(4)
                         }),
-                        "status": "FAIL"
+                        "status": "FAIL",
+                        "embedding": json.dumps(new_embedding_list),  # Store embedding as JSON
+                        "max_similarity": f"{max_similarity:.4f}"  # Store similarity with 4 decimals
                     })
                 
                 print(f"✓ Task saved to {file_name} with status FAIL.")

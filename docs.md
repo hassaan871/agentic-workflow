@@ -10,6 +10,7 @@
 7. [Implementation Details](#implementation-details)
 8. [Usage](#usage)
 9. [Output Format](#output-format)
+10. [Taxonomy Selection](#taxonomy-selection)
 
 ---
 
@@ -18,6 +19,7 @@
 The QC (Question Correction) Pipeline is an agentic workflow system designed to generate and refine prompts that test model-breaking scenarios. The system uses an iterative refinement approach where prompts are continuously improved until they successfully break the model (cause 3+ criteria to fail 3+ times out of 4 attempts).
 
 ### Key Features
+- **Taxonomy Selection**: Interactive prompt to select which taxonomy to use (currently Question Correction)
 - **Iterative Refinement**: Automatically refines prompts that don't break the model
 - **Criteria-Level Analysis**: Tracks which specific criteria pass/fail across multiple attempts
 - **Progressive Improvement**: Targets specific criteria that need improvement while maintaining those already failing
@@ -28,12 +30,13 @@ The QC (Question Correction) Pipeline is an agentic workflow system designed to 
 ## Feature Description
 
 ### What It Does
-1. **Generates** Question Correction prompts (questions with hidden flaws where all options are incorrect)
-2. **Tests** each prompt by having Agent02 respond 4 times
-3. **Evaluates** each response against multiple criteria using a Judge
-4. **Analyzes** which criteria are passing/failing
-5. **Refines** prompts that don't break the model (if < 3 criteria failing 3+ times)
-6. **Saves** only model-breaking prompts to CSV
+1. **Selects Taxonomy** - Interactive prompt to choose which taxonomy to use (default: Question Correction)
+2. **Generates** prompts based on selected taxonomy (e.g., Question Correction prompts with hidden flaws)
+3. **Tests** each prompt by having Agent02 respond 4 times
+4. **Evaluates** each response against multiple criteria using a Judge
+5. **Analyzes** which criteria are passing/failing
+6. **Refines** prompts that don't break the model (if < 3 criteria failing 3+ times)
+7. **Saves** only model-breaking prompts to CSV
 
 ### Success Condition
 A prompt is considered "model breaking" when:
@@ -48,6 +51,10 @@ A prompt is considered "model breaking" when:
 
 ```
 START
+  ↓
+TAXONOMY SELECTION (Interactive Prompt)
+  - User selects taxonomy (default: 1 for Question Correction)
+  - System configures prompt and file based on selection
   ↓
 FOR EACH RUN (--runs):
   │
@@ -88,7 +95,7 @@ FOR EACH RUN (--runs):
                     ↓
 ┌─────────────────────────────────────────────────────────┐
 │ Step 1: Generate/Refine Prompt                           │
-│   - If iteration == 1: Use SYSTEM_PROMPT_QC             │
+│   - If iteration == 1: Use SYSTEM_PROMPT (selected taxonomy)│
 │   - If iteration > 1: Use create_refinement_feedback()   │
 │   - Agent01 outputs: prompt, criteria, correct_response  │
 └─────────────────────────────────────────────────────────┘
@@ -138,16 +145,25 @@ qc.py
 │   └── OUTPUT_FORMAT_NOTE
 │
 ├── Helper Functions
+│   ├── select_taxonomy()
 │   ├── parse_criteria_from_judge()
 │   ├── get_criteria_text()
 │   └── create_refinement_feedback()
 │
-├── CSV Setup
-│   └── Initialize CSV file with headers
-│
 ├── CLI Argument Parsing
 │   ├── --runs
 │   └── --max-iterations
+│
+├── Taxonomy Selection
+│   └── Interactive prompt to select taxonomy
+│
+├── System Configuration
+│   ├── Set SYSTEM_PROMPT based on taxonomy
+│   ├── Set file_name based on taxonomy
+│   └── Update file_path
+│
+├── CSV Setup
+│   └── Initialize CSV file with headers (based on taxonomy)
 │
 └── Main Execution Loop
     ├── FOR each run
@@ -184,6 +200,39 @@ qc.py
 ## Key Components
 
 ### 1. Helper Functions
+
+#### `select_taxonomy()`
+**Purpose**: Interactive prompt for taxonomy selection
+
+**Input**: None (reads from user input)
+
+**Output**: Taxonomy identifier string (e.g., "qc" for Question Correction)
+
+**How it works**:
+1. Displays available taxonomies with numbers and descriptions
+2. Prompts user to enter taxonomy number (default: 1)
+3. Validates input - only accepts valid taxonomy numbers
+4. Shows error and exits if invalid input
+5. Returns taxonomy identifier for system configuration
+
+**Example**:
+```
+======================================================================
+                    TAXONOMY SELECTION
+======================================================================
+
+Available Taxonomies:
+----------------------------------------------------------------------
+  [1] Question Correction (QC)
+      Questions containing logical fallacies, factual errors, or inconsistencies where all provided options are incorrect
+
+======================================================================
+Enter taxonomy number (default: 1): 1
+
+======================================================================
+✓ Selected Taxonomy: Question Correction (QC)
+======================================================================
+```
 
 #### `parse_criteria_from_judge(judge_output, criteria_id)`
 **Purpose**: Extract PASS/FAIL status for a specific criteria from judge output
@@ -289,7 +338,7 @@ for run_idx in range(RUNS):
         
         # Step 1: Generate or refine
         if iteration == 1:
-            agent01_input = SYSTEM_PROMPT_QC  # Generate new
+            agent01_input = SYSTEM_PROMPT  # Generate new (based on selected taxonomy)
         else:
             agent01_input = create_refinement_feedback(...)  # Refine
         
@@ -502,6 +551,24 @@ python qc.py --runs 10 --max-iterations 15
 ### Expected Console Output
 
 ```
+======================================================================
+                    TAXONOMY SELECTION
+======================================================================
+
+Available Taxonomies:
+----------------------------------------------------------------------
+  [1] Question Correction (QC)
+      Questions containing logical fallacies, factual errors, or inconsistencies where all provided options are incorrect
+
+======================================================================
+Enter taxonomy number (default: 1): 1
+
+======================================================================
+✓ Selected Taxonomy: Question Correction (QC)
+======================================================================
+
+data.csv already exists.
+
 ========== RUN 1/5 ==========
 
 ============================================================
@@ -566,7 +633,7 @@ Individual Statuses: ['FAIL', 'FAIL', 'FAIL', 'PASS']
    Saving to CSV...
 ============================================================
 
-✓ Task saved to qc_data.csv with status FAIL.
+✓ Task saved to data.csv with status FAIL.
 ```
 
 ---
@@ -575,10 +642,11 @@ Individual Statuses: ['FAIL', 'FAIL', 'FAIL', 'PASS']
 
 ### CSV File Structure
 
-**File**: `qc_data.csv`
+**File**: `data.csv` (shared across all taxonomies)
 
 **Columns**:
-- `prompt`: The Question Correction prompt
+- `taxonomy`: Taxonomy identifier (e.g., "qc" for Question Correction)
+- `prompt`: The prompt text
 - `correct_response`: Ideal correct response
 - `response_reference`: JSON string of criteria array
 - `model`: Model identifier
@@ -618,6 +686,86 @@ Individual Statuses: ['FAIL', 'FAIL', 'FAIL', 'PASS']
     "status": "FAIL"
   }
 }
+```
+
+---
+
+## Taxonomy Selection
+
+### Overview
+The system supports multiple taxonomies (currently Question Correction, with more to be added). Users interactively select which taxonomy to use at the start of execution.
+
+### How It Works
+
+1. **Interactive Prompt**: When the script starts, it displays available taxonomies
+2. **User Selection**: User enters taxonomy number (default: 1 for Question Correction)
+3. **Validation**: System validates input and shows error if invalid
+4. **Configuration**: System configures prompt template and output file based on selection
+
+### Available Taxonomies
+
+Currently Available:
+- **1. Question Correction (QC)**: Questions containing logical fallacies, factual errors, or inconsistencies where all provided options are incorrect
+
+Future Taxonomies (to be added):
+- Additional taxonomies will be added to the `select_taxonomy()` function
+
+### Implementation Details
+
+**Function**: `select_taxonomy()`
+- Location: Before CLI argument parsing
+- Displays numbered options with descriptions
+- Validates user input
+- Returns taxonomy identifier ("qc", "itf", "mim", etc.)
+
+**System Configuration**:
+```python
+if TAXONOMY == "qc":
+    SYSTEM_PROMPT = SYSTEM_PROMPT_QC
+elif TAXONOMY == "itf":
+    SYSTEM_PROMPT = SYSTEM_PROMPT_ITF  # Future
+
+# All taxonomies use the same CSV file (data.csv)
+file_name = "data.csv"
+```
+
+**CSV Storage**:
+- All taxonomies write to the same `data.csv` file
+- Each row includes a `taxonomy` field to identify which taxonomy was used
+- This allows easy filtering and analysis across different taxonomies
+
+**Error Handling**:
+- Invalid input: Shows error message and exits
+- Empty input: Defaults to Question Correction (1)
+- Keyboard interrupt: Gracefully exits
+
+### Adding New Taxonomies
+
+To add a new taxonomy:
+
+1. Add to `taxonomies` dictionary in `select_taxonomy()`:
+```python
+taxonomies = {
+    "1": {"id": "qc", "name": "Question Correction (QC)", ...},
+    "2": {"id": "itf", "name": "Intentional Textual Flaws (ITF)", ...}  # New
+}
+```
+
+2. Add system prompt constant:
+```python
+SYSTEM_PROMPT_ITF = f"""
+    {PROMPT_HEADER}
+    Intentional Textual Flaws (ITF):
+    ...
+"""
+```
+
+3. Update configuration section:
+```python
+if TAXONOMY == "itf":
+    SYSTEM_PROMPT = SYSTEM_PROMPT_ITF
+# Note: All taxonomies use the same CSV file (data.csv)
+# The taxonomy field in CSV will automatically store "itf"
 ```
 
 ---
