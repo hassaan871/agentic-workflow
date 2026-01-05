@@ -19,7 +19,17 @@ client = OpenAI(
     base_url=BASE_URL,
     )
 
-PROMPT_HEADER = """
+# Extract criteria design rules as separate constant (used in both initial and refinement)
+CRITERIA_DESIGN_RULES = """
+    Criteria Design Rules:
+    - Each criterion must evaluate a single, independent behavior.
+    - No criterion may be a logical consequence of another criterion.
+    - Avoid rephrasing the same judgment across multiple criteria.
+    - If two criteria would always be satisfied together, merge them.
+    - EACH CRITERION MUST BE SELF CONTAINED, THERE SHOULD BE NO OVERLAP CRITERIAS
+"""
+
+PROMPT_HEADER = f"""
     You are an Inverse IFEval data generator designed to test counter-intuitive instruction.
     
     The examples below are for REFERENCE ONLY:
@@ -45,12 +55,7 @@ PROMPT_HEADER = """
     Note: The example above shows 4 criteria, but the actual number of criteria in "response_reference" may vary depending on the prompt scenario. Include 3 to 5 criteria as appropriate. Each criterion should be independently checkable and accurately reflect the quality of the generated response.
     Do NOT include explanations, markdown, or extra text outside the JSON.
     
-    Criteria Design Rules:
-    - Each criterion must evaluate a single, independent behavior.
-    - No criterion may be a logical consequence of another criterion.
-    - Avoid rephrasing the same judgment across multiple criteria.
-    - If two criteria would always be satisfied together, merge them.
-    - EACH CRITERION MUST BE SELF CONTAINED, THERE SHOULD BE NO OVERLAP CRITERIAS
+    {CRITERIA_DESIGN_RULES}
 """
 
 SYSTEM_PROMPT_QC = f"""
@@ -200,6 +205,186 @@ JUDGE_PROMPT_TEMPLATE = """
             Explanation: Explain briefly which criteria failed and why. If no criteria failed, explicitly state that all criteria were satisfied.
     """
 
+# Output format note for refinement (no "generate NEW" instruction)
+OUTPUT_FORMAT_NOTE = """
+    Output Format:
+    Output MUST be valid JSON and follow this exact structure:
+    {{
+        "taxonomy": "<taxonomy_name>",
+        "prompt": "<task prompt>",
+        "correct_response": "<ideal correct response>",
+        "response_reference": [
+            {{ "id": "C1", "criteria": "..." }},
+            {{ "id": "C2", "criteria": "..." }},
+            {{ "id": "C3", "criteria": "..." }},
+            {{ "id": "C4", "criteria": "..." }}
+        ]
+    }}
+    Note: The number of criteria may vary (3 to 5). Each criterion should be independently checkable.
+    Do NOT include explanations, markdown, or extra text outside the JSON.
+"""
+
+# ---------------- HELPER FUNCTIONS -----------------
+def parse_criteria_from_judge(judge_output, criteria_id):
+    """
+    Parse judge output to extract PASS/FAIL status for a specific criteria.
+    
+    Judge output format:
+    Grading Basis:
+    {{"C1": "PASS", "C2": "FAIL", ...}}
+    
+    Returns "PASS" or "FAIL" for the given criteria_id, or None if not found.
+    """
+    try:
+        # Find the Grading Basis section
+        if "Grading Basis:" in judge_output:
+            # Extract the JSON part after "Grading Basis:"
+            start_idx = judge_output.find("Grading Basis:") + len("Grading Basis:")
+            # Find the next line or closing brace
+            end_idx = judge_output.find("\n", start_idx)
+            if end_idx == -1:
+                end_idx = len(judge_output)
+            
+            grading_basis = judge_output[start_idx:end_idx].strip()
+            
+            # Try to parse as JSON
+            # Handle both single-line and multi-line JSON
+            grading_basis = grading_basis.replace("\n", " ").strip()
+            
+            # Extract JSON object
+            if "{" in grading_basis and "}" in grading_basis:
+                json_start = grading_basis.find("{")
+                json_end = grading_basis.rfind("}") + 1
+                json_str = grading_basis[json_start:json_end]
+                
+                criteria_dict = json.loads(json_str)
+                return criteria_dict.get(criteria_id, None)
+    except Exception as e:
+        # If parsing fails, try alternative method
+        pass
+    
+    # Fallback: search for criteria_id in the text
+    if f'"{criteria_id}": "PASS"' in judge_output:
+        return "PASS"
+    elif f'"{criteria_id}": "FAIL"' in judge_output:
+        return "FAIL"
+    
+    return None
+
+def get_criteria_text(data_qc, criteria_id):
+    """
+    Extract the criteria text for a given criteria_id from data_qc.
+    Returns the criteria text or None if not found.
+    """
+    response_reference = data_qc.get("response_reference", [])
+    for criteria in response_reference:
+        if criteria.get("id") == criteria_id:
+            # Try different possible keys for criteria text
+            return criteria.get("criteria") or criteria.get("criteria1") or criteria.get("criteria2") or criteria.get("criteria3") or criteria.get("criteria4") or criteria.get("criteria5")
+    return None
+
+def create_refinement_feedback(data_qc, criteria_failures, judge_responses, nemotron_responses):
+    """
+    Create feedback prompt for Agent01 to refine the prompt and criteria.
+    
+    Analyzes which criteria are passing/failing and provides targeted improvement instructions.
+    Separates criteria into two groups:
+    - Needs improvement: Criteria failing < 3 times (make them fail more)
+    - Keep intact: Criteria failing 3+ times (maintain their failing)
+    
+    Includes CRITERIA_DESIGN_RULES to ensure criteria stay non-overlapping.
+    """
+    # Separate criteria into two groups
+    needs_improvement = []
+    keep_intact = []
+    
+    for criteria_id, fail_count in criteria_failures.items():
+        criteria_text = get_criteria_text(data_qc, criteria_id)
+        
+        if fail_count < 3:
+            # Needs improvement - passing too often
+            needs_improvement.append({
+                'id': criteria_id,
+                'fail_count': fail_count,
+                'pass_count': 4 - fail_count,
+                'text': criteria_text
+            })
+        else:
+            # Working well - failing consistently
+            keep_intact.append({
+                'id': criteria_id,
+                'fail_count': fail_count,
+                'text': criteria_text
+            })
+    
+    # Build feedback prompt
+    feedback = f"""
+    You are refining a Question Correction prompt to make it harder for the model to pass.
+    
+    {OUTPUT_FORMAT_NOTE}
+    
+    CURRENT PROMPT:
+    {data_qc.get('prompt', '')}
+    
+    CURRENT CRITERIA:
+    {json.dumps(data_qc.get('response_reference', []), indent=2)}
+    
+    CURRENT CORRECT RESPONSE:
+    {data_qc.get('correct_response', '')}
+    
+    TEST RESULTS ANALYSIS:
+    """
+    
+    # Add criteria needing improvement
+    if needs_improvement:
+        feedback += """
+    CRITERIA TO IMPROVE (make them fail more often):
+    """
+        for item in needs_improvement:
+            feedback += f"""
+    - {item['id']}: Currently failing {item['fail_count']}/4 times (passed {item['pass_count']} times)
+      Current criteria: {item['text']}
+      Action: Make the prompt harder so this criteria fails more often, and make this criteria stricter
+    """
+    
+    # Add criteria working well
+    if keep_intact:
+        feedback += """
+    CRITERIA TO KEEP INTACT (maintain their failing):
+    """
+        for item in keep_intact:
+            feedback += f"""
+    - {item['id']}: Currently failing {item['fail_count']}/4 times ✅
+      Current criteria: {item['text']}
+      Action: Keep the prompt constraints that make this fail, and keep this criteria unchanged
+    """
+    
+    # Add criteria design rules
+    feedback += f"""
+    
+    {CRITERIA_DESIGN_RULES}
+    
+    YOUR TASK:
+    1. For criteria needing improvement:
+       - Update the prompt to make it harder (add complexity, misleading context, etc.)
+       - Make those criteria stricter (harder to pass) but follow the design rules above
+       - Ensure prompt and criteria stay aligned
+    
+    2. For criteria working well:
+       - Keep the prompt constraints that make them fail
+       - Keep those criteria unchanged
+    
+    3. Update correct_response to match the new prompt
+    
+    4. Ensure all criteria follow the design rules (no overlap, self-contained)
+    
+    5. Keep the Question Correction category (hidden flaw, all options incorrect)
+    
+    Output updated JSON.
+    """
+    
+    return feedback
+
 # ---------------- CSV SETUP -----------------
 # If CSV doesn't exist, create it with headers
 if not os.path.exists(file_path):
@@ -224,119 +409,228 @@ parser.add_argument(
     help="Number of times to execute the QC pipeline"
 )
 
+parser.add_argument(
+    "--max-iterations",
+    type=int,
+    default=10,
+    help="Maximum iterations to refine prompt until model breaking (default: 10)"
+)
+
 args = parser.parse_args()
 
-RUNS = args.runs    
+RUNS = args.runs
+MAX_ITERATIONS = args.max_iterations    
 
 for run_idx in range(RUNS):
     print(f"\n========== RUN {run_idx + 1}/{RUNS} ==========")
         
     try:
-        # --- Layer 1: Generate task ---
-        print("Layer 1: Nemotron Generate task")
+        # Iteration loop: Keep refining until model breaking or max iterations
+        iteration = 0
+        best_criteria_count = 0
+        best_result = None
+        total_failing_criteria = 0  # Initialize for use after loop
+        previous_total_failing = 0  # Track previous iteration for progress comparison
         
-        qc_agent_response = client.responses.create(
-            model="openrouter/nvidia/nemotron-3-nano-30b-a3b",
-            input=SYSTEM_PROMPT_QC
-        )
-        
-        # OpenAI normalized output ITF
-        print("Question Correction Agent Response: ")
-        print(qc_agent_response.output_text)
-        print("------------------------------------")
-        
-        data_qc = json.loads(qc_agent_response.output_text)
-        
-        # --- Layer 2: Get 4 responses from Agent02 to the same prompt ---
-        print("Layer 2: Nemotron Solve the QC task (4 attempts)")
-        qc_response_reference = data_qc["response_reference"]
-        qc_response_reference_json = json.dumps(qc_response_reference)
-        
-        # Store all 4 attempts' data
-        nemotron_responses = []      # All 4 Agent02 responses
-        judge_responses = []         # All 4 judge outputs
-        individual_statuses = []     # PASS/FAIL for each attempt
-        
-        # Loop 4 times: get response and judge it immediately
-        for attempt in range(4):
-            print(f"\n--- Attempt {attempt + 1}/4 ---")
-            # Get Agent02 response (same prompt each time)
-            qc_nemotron_response = client.responses.create(
+        while iteration < MAX_ITERATIONS:
+            iteration += 1
+            print(f"\n{'='*60}")
+            print(f"🔄 ITERATION {iteration}/{MAX_ITERATIONS}")
+            print(f"{'='*60}")
+            
+            # --- Layer 1: Generate or refine prompt ---
+            if iteration == 1:
+                # First iteration: Generate new prompt
+                print("Layer 1: Generating initial prompt...")
+                agent01_input = SYSTEM_PROMPT_QC
+            else:
+                # Later iterations: Refine with feedback
+                print(f"Layer 1: Refining prompt (iteration {iteration})...")
+                agent01_input = create_refinement_feedback(
+                    data_qc=data_qc,
+                    criteria_failures=criteria_failures,
+                    judge_responses=judge_responses,
+                    nemotron_responses=nemotron_responses
+                )
+            
+            qc_agent_response = client.responses.create(
                 model="openrouter/nvidia/nemotron-3-nano-30b-a3b",
-                input=data_qc["prompt"]
+                input=agent01_input
             )
             
-            print(f"Response {attempt + 1}:")
-            print(qc_nemotron_response.output_text)
-            print("----------------------------------")
+            print("Agent01 Response: ")
+            print(qc_agent_response.output_text)
+            print("------------------------------------")
             
-            nemotron_responses.append(qc_nemotron_response.output_text)
+            data_qc = json.loads(qc_agent_response.output_text)
             
-            # --- Layer 3: Judge this attempt's response ---
-            print(f"Layer 3: Judge Layer (Attempt {attempt + 1})")
-            qc_judge_system_prompt = JUDGE_PROMPT_TEMPLATE.format(
-                STUDENT_ANSWER=qc_nemotron_response.output_text,
-                STANDARD_CRITERIA=qc_response_reference_json
-            )
+            # --- Layer 2: Get 4 responses from Agent02 to the same prompt ---
+            print("Layer 2: Nemotron Solve the QC task (4 attempts)")
+            qc_response_reference = data_qc["response_reference"]
+            qc_response_reference_json = json.dumps(qc_response_reference)
             
-            qc_judge_response = client.responses.create(
-                model="gpt-5",
-                input=qc_judge_system_prompt
-            )
+            # Store all 4 attempts' data
+            nemotron_responses = []      # All 4 Agent02 responses
+            judge_responses = []         # All 4 judge outputs
+            individual_statuses = []     # PASS/FAIL for each attempt
             
-            print(f"\nJudge Layer Output (Attempt {attempt + 1}):") 
-            print(qc_judge_response.output_text)
-            print("------------------------------")
-            
-            judge_responses.append(qc_judge_response.output_text)
-            
-            # Check if this attempt passed (1 point) or failed (0 point)
-            attempt_status = "PASS" if "1 point" in qc_judge_response.output_text else "FAIL"
-            individual_statuses.append(attempt_status)
-            print(f"Attempt {attempt + 1} Status: {attempt_status}")
-        
-        # Final decision: Model breaking only if 3+ out of 4 attempts failed
-        fail_count = individual_statuses.count("FAIL")
-        final_status = "FAIL" if fail_count >= 3 else "PASS"
-        
-        print(f"\n========== FINAL RESULTS ==========")
-        print(f"Individual Statuses: {individual_statuses}")
-        print(f"FAIL count: {fail_count}/4")
-        print(f"Final Status: {final_status} (Model Breaking: {'YES' if final_status == 'FAIL' else 'NO'})")
-        print("===================================\n")
-        
-        # --- Save to CSV only if model breaking (3+ failures) ---
-        if final_status == "FAIL":
-            print(f"✓ Model Breaking detected! Saving to {file_name}...")
-            with open(file_path, mode='a', newline='', encoding='utf-8') as csv_file:
-                writer = csv.DictWriter(csv_file, fieldnames=[
-                    "prompt", "correct_response", "response_reference",
-                    "model", "nemotron_response", "judge_response", "status"
-                ])
+            # Loop 4 times: get response and judge it immediately
+            for attempt in range(4):
+                print(f"\n--- Attempt {attempt + 1}/4 ---")
+                # Get Agent02 response (same prompt each time)
+                qc_nemotron_response = client.responses.create(
+                    model="openrouter/nvidia/nemotron-3-nano-30b-a3b",
+                    input=data_qc["prompt"]
+                )
                 
-                writer.writerow({
-                    "prompt": data_qc.get("prompt", ""),
-                    "correct_response": data_qc.get("correct_response", ""),
-                    "response_reference": json.dumps(data_qc.get("response_reference", [])),
-                    "model": "openrouter/nvidia/nemotron-3-nano-30b-a3b",
-                    # Store all 4 responses as JSON: {"attempt_1": "...", "attempt_2": "...", ...}
-                    "nemotron_response": json.dumps({
-                        f"attempt_{i+1}": resp for i, resp in enumerate(nemotron_responses)
-                    }),
-                    # Store all 4 judge outputs as JSON: {"attempt_1": {"judge_output": "...", "status": "FAIL"}, ...}
-                    "judge_response": json.dumps({
-                        f"attempt_{i+1}": {
-                            "judge_output": judge_responses[i],
-                            "status": individual_statuses[i]
-                        } for i in range(4)
-                    }),
-                    "status": final_status
-                })
+                print(f"Response {attempt + 1}:")
+                print(qc_nemotron_response.output_text)
+                print("----------------------------------")
+                
+                nemotron_responses.append(qc_nemotron_response.output_text)
+                
+                # --- Layer 3: Judge this attempt's response ---
+                print(f"Layer 3: Judge Layer (Attempt {attempt + 1})")
+                qc_judge_system_prompt = JUDGE_PROMPT_TEMPLATE.format(
+                    STUDENT_ANSWER=qc_nemotron_response.output_text,
+                    STANDARD_CRITERIA=qc_response_reference_json
+                )
+                
+                qc_judge_response = client.responses.create(
+                    model="gpt-5",
+                    input=qc_judge_system_prompt
+                )
+                
+                print(f"\nJudge Layer Output (Attempt {attempt + 1}):") 
+                print(qc_judge_response.output_text)
+                print("------------------------------")
+                
+                judge_responses.append(qc_judge_response.output_text)
+                
+                # Check if this attempt passed (1 point) or failed (0 point)
+                attempt_status = "PASS" if "1 point" in qc_judge_response.output_text else "FAIL"
+                individual_statuses.append(attempt_status)
+                print(f"Attempt {attempt + 1} Status: {attempt_status}")
             
-            print(f"✓ Task saved to {file_name} with status {final_status}.")
-        else:
-            # Skip saving if not model breaking (0, 1, or 2 failures)
-            print(f"✗ Not model breaking ({fail_count}/4 failures). Skipping CSV save.")
+            # --- Analyze criteria-level failures ---
+            # Parse judge outputs to get per-criteria PASS/FAIL counts
+            criteria_failures = {}
+            criteria_list = [criteria.get("id") for criteria in data_qc.get("response_reference", [])]
+            
+            # Initialize failure counts for all criteria
+            for criteria_id in criteria_list:
+                criteria_failures[criteria_id] = 0
+            
+            # Count failures for each criteria across all 4 attempts
+            for judge_output in judge_responses:
+                for criteria_id in criteria_list:
+                    status = parse_criteria_from_judge(judge_output, criteria_id)
+                    if status == "FAIL":
+                        criteria_failures[criteria_id] += 1
+            
+            # Count how many criteria are failing consistently (3+ times)
+            total_failing_criteria = sum(1 for count in criteria_failures.values() if count >= 3)
+            
+            # Track best result
+            if total_failing_criteria > best_criteria_count:
+                best_criteria_count = total_failing_criteria
+                best_result = {
+                    "data_qc": data_qc,
+                    "nemotron_responses": nemotron_responses,
+                    "judge_responses": judge_responses,
+                    "individual_statuses": individual_statuses,
+                    "criteria_failures": criteria_failures
+                }
+            
+            # --- Display results ---
+            print(f"\n{'─'*60}")
+            print(f"📊 ITERATION {iteration} - TEST RESULTS")
+            print(f"{'─'*60}")
+            fail_count = individual_statuses.count("FAIL")
+            print(f"Overall: {fail_count}/4 attempts failed")
+            print(f"Individual Statuses: {individual_statuses}")
+            
+            print(f"\n📋 CRITERIA-LEVEL ANALYSIS:")
+            for criteria_id, fail_count_criteria in criteria_failures.items():
+                status_icon = "✅" if fail_count_criteria >= 3 else "⚠️" if fail_count_criteria >= 2 else "❌"
+                print(f"  {status_icon} {criteria_id}: Failed {fail_count_criteria}/4 times")
+            
+            print(f"\n📈 PROGRESS TRACKING:")
+            print(f"  Criteria failing consistently (3+): {total_failing_criteria}")
+            if iteration > 1:
+                improvement = total_failing_criteria - previous_total_failing
+                if improvement > 0:
+                    print(f"  ✅ Improvement: +{improvement} criteria now failing")
+                elif improvement == 0:
+                    print(f"  ⚠️  No improvement: Same number of criteria failing")
+                else:
+                    print(f"  ❌ Regression: {improvement} criteria now failing (was {previous_total_failing})")
+            
+            # Show what needs improvement vs what to maintain
+            needs_work = [c for c, count in criteria_failures.items() if count < 3]
+            maintain = [c for c, count in criteria_failures.items() if count >= 3]
+            
+            if iteration < MAX_ITERATIONS and total_failing_criteria < 3:
+                print(f"\n🎯 TARGETING FOR NEXT ITERATION:")
+                if needs_work:
+                    print(f"  Improve: {', '.join(needs_work)}")
+                if maintain:
+                    print(f"  Maintain: {', '.join(maintain)}")
+            
+            # Update for next iteration
+            previous_total_failing = total_failing_criteria
+            
+            # Check if model breaking (3+ criteria failing 3+ times)
+            if total_failing_criteria >= 3:
+                print(f"\n{'─'*60}")
+                print(f"✅ SUCCESS! Model breaking achieved after {iteration} iteration(s)!")
+                print(f"   Saving to CSV...")
+                print(f"{'='*60}\n")
+                
+                # Save to CSV
+                with open(file_path, mode='a', newline='', encoding='utf-8') as csv_file:
+                    writer = csv.DictWriter(csv_file, fieldnames=[
+                        "prompt", "correct_response", "response_reference",
+                        "model", "nemotron_response", "judge_response", "status"
+                    ])
+                    
+                    writer.writerow({
+                        "prompt": data_qc.get("prompt", ""),
+                        "correct_response": data_qc.get("correct_response", ""),
+                        "response_reference": json.dumps(data_qc.get("response_reference", [])),
+                        "model": "openrouter/nvidia/nemotron-3-nano-30b-a3b",
+                        # Store all 4 responses as JSON: {"attempt_1": "...", "attempt_2": "...", ...}
+                        "nemotron_response": json.dumps({
+                            f"attempt_{i+1}": resp for i, resp in enumerate(nemotron_responses)
+                        }),
+                        # Store all 4 judge outputs as JSON: {"attempt_1": {"judge_output": "...", "status": "FAIL"}, ...}
+                        "judge_response": json.dumps({
+                            f"attempt_{i+1}": {
+                                "judge_output": judge_responses[i],
+                                "status": individual_statuses[i]
+                            } for i in range(4)
+                        }),
+                        "status": "FAIL"
+                    })
+                
+                print(f"✓ Task saved to {file_name} with status FAIL.")
+                break  # Success! Exit iteration loop
+            
+            else:
+                # Not model breaking yet
+                print(f"\n{'─'*60}")
+                print(f"❌ Not model breaking yet ({total_failing_criteria} criteria failing consistently).")
+                if iteration < MAX_ITERATIONS:
+                    print(f"   Refining prompt for iteration {iteration + 1}...")
+                else:
+                    print(f"   Max iterations reached. Stopping.")
+                print(f"{'='*60}\n")
+        
+        # If we exited loop without success
+        if total_failing_criteria < 3:
+            print(f"⚠️  Run {run_idx + 1} completed without achieving model breaking after {iteration} iteration(s).")
+            if best_result and best_criteria_count >= 2:
+                print(f"   Best result: {best_criteria_count} criteria failing consistently.")
         
     except Exception as e:
         print("Error:", e)
