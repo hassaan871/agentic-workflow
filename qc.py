@@ -1,16 +1,17 @@
 import os
 import json
+import csv
 from openai import OpenAI
+import argparse
 
 # Using hardcoded values to allow quick local execution without environment variables
 API_KEY = "sk-NMqHr2L2nqIOyZFgynUR9w"
 BASE_URL = "http://34.72.104.120"
+file_name = "qc_data.csv"
 
 # CSV file names
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-PASSING_CSV = os.path.join(SCRIPT_DIR, "passed.csv")
-FAILING_CSV = os.path.join(SCRIPT_DIR, "failed.csv")
+file_path = os.path.join(SCRIPT_DIR, file_name)
 
 # Initialize OpenAI client
 client = OpenAI(
@@ -171,7 +172,7 @@ JUDGE_PROMPT_TEMPLATE = """
         STRICT CRITERION EVALUATION RULES:
             Each criterion  must be evaluated independently.
             Assign PASS only if the response fully satisfies the criterion exactly as written.
-            Assign FAIL if there is any deviation, additional text, explanatory sentences, extra information, or missing elements.
+            Assign FAIL only if the response don't satisfies the criterion exactly as written or missing element.
             Do not give leniency for partial correctness, formatting, or phrasing. Literal compliance with the criterion is required.
             Only explicit, literal, and complete compliance with each criterion qualifies as PASS for that criterion.
         
@@ -195,55 +196,106 @@ JUDGE_PROMPT_TEMPLATE = """
                 "C5 and so on"...}}
                 NOTE: The number of criteria may vary depending on the prompt. The example above with 4 criteria is provided for formatting reference only.
 
-            Score: X point(s) (where X is either 0 or 1)
+            Score: X point (where X is either 0 or 1)
             Explanation: Explain briefly which criteria failed and why. If no criteria failed, explicitly state that all criteria were satisfied.
     """
-    
-try:
-    # --- Layer 1: Generate task ---
-    print("Layer 1: Generate task")
-    
-     # Intentional Textual Flaws
-    qc_agent_response = client.responses.create(
-        model="gpt-5",
-        input=SYSTEM_PROMPT_QC
-    )
-    
-    # OpenAI normalized output ITF
-    print("Question Correction Agent Response: ")
-    print(qc_agent_response.output_text)
-    print("------------------------------------")
-    
-    data_qc = json.loads(qc_agent_response.output_text)
-    
-        # Intentional Textual Flaws
-    print("Layer 2: Nemotron Solve the QC task")
-    qc_nemotron_response = client.responses.create(
-        model="openrouter/nvidia/nemotron-3-nano-30b-a3b",
-        input=data_qc["prompt"]
-    )
 
-    print(qc_nemotron_response.output_text)
-    print("----------------------------------")
-    
-    # --- Layer 3: Judge Nemotron Response ---
-    print("Layer 3: Judge Layer")
-    qc_response_reference = data_qc["response_reference"]
-    qc_response_reference_json = json.dumps(qc_response_reference)
-    
-    qc_judge_system_prompt = JUDGE_PROMPT_TEMPLATE.format(
-        STUDENT_ANSWER=qc_nemotron_response.output_text,
-        STANDARD_CRITERIA=qc_response_reference_json
-    )
-    
-    qc_judge_response = client.responses.create(
-        model="gpt-5",
-        input=qc_judge_system_prompt
-    )
+# ---------------- CSV SETUP -----------------
+# If CSV doesn't exist, create it with headers
+if not os.path.exists(file_path):
+    with open(file_path, mode='w', newline='', encoding='utf-8') as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=[
+            "prompt", "correct_response", "response_reference",
+            "model", "nemotron_response", "judge_response", "status"
+        ])
+        writer.writeheader()
+    print(f"{file_name} created successfully!")
+else:
+    print(f"{file_name} already exists.")
 
-    print("\nJudge Layer Output:")
-    print(qc_judge_response.output_text)
-    print("------------------------------")
-    
-except Exception as e:
-    print("Error calling OpenAI API:", e)
+# ---------------- CLI ARGUMENT SETUP -----------------
+# Parse command-line arguments to control how many times
+parser = argparse.ArgumentParser(description="Run QC pipeline multiple times")
+
+parser.add_argument(
+    "--runs",
+    type=int,
+    default=1,
+    help="Number of times to execute the QC pipeline"
+)
+
+args = parser.parse_args()
+
+RUNS = args.runs    
+
+for run_idx in range(RUNS):
+    print(f"\n========== RUN {run_idx + 1}/{RUNS} ==========")
+        
+    try:
+        # --- Layer 1: Generate task ---
+        print("Layer 1: Nemotron Generate task")
+        
+        qc_agent_response = client.responses.create(
+            model="openrouter/nvidia/nemotron-3-nano-30b-a3b",
+            input=SYSTEM_PROMPT_QC
+        )
+        
+        # OpenAI normalized output ITF
+        print("Question Correction Agent Response: ")
+        print(qc_agent_response.output_text)
+        print("------------------------------------")
+        
+        data_qc = json.loads(qc_agent_response.output_text)
+        
+        # --- Layer 2: Nemotron responds to the prompt --- 
+        print("Layer 2: Nemotron Solve the QC task")
+        qc_nemotron_response = client.responses.create(
+            model="openrouter/nvidia/nemotron-3-nano-30b-a3b",
+            input=data_qc["prompt"]
+        )
+
+        print(qc_nemotron_response.output_text)
+        print("----------------------------------")
+        
+        # --- Layer 3: Judge Nemotron Response ---
+        print("Layer 3: Judge Layer")
+        qc_response_reference = data_qc["response_reference"]
+        qc_response_reference_json = json.dumps(qc_response_reference)
+        
+        qc_judge_system_prompt = JUDGE_PROMPT_TEMPLATE.format(
+            STUDENT_ANSWER=qc_nemotron_response.output_text,
+            STANDARD_CRITERIA=qc_response_reference_json
+        )
+        
+        qc_judge_response = client.responses.create(
+            model="gpt-5",
+            input=qc_judge_system_prompt
+        )
+
+        print("\nJudge Layer Output:") 
+        print(qc_judge_response.output_text)
+        print("------------------------------")
+        
+        # Determine pass/fail from judge (simplified example)
+        status = "PASS" if "1 point" in qc_judge_response.output_text else "FAIL"
+        
+        # ------------------- SAVE TO CSV -------------------
+        with open(file_path, mode='a', newline='', encoding='utf-8') as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=[
+                "prompt", "correct_response", "response_reference",
+                "model", "nemotron_response", "judge_response", "status"
+            ])
+            writer.writerow({
+                "prompt": data_qc.get("prompt", ""),
+                "correct_response": data_qc.get("correct_response", ""),
+                "response_reference": json.dumps(data_qc.get("response_reference", [])),
+                "model": "openrouter/nvidia/nemotron-3-nano-30b-a3b",
+                "nemotron_response": qc_nemotron_response.output_text,
+                "judge_response": qc_judge_response.output_text,
+                "status": status
+            })
+
+        print(f"Task saved to {file_name} with status {status}.")
+        
+    except Exception as e:
+        print("Error:", e)

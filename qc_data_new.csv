@@ -1,0 +1,165 @@
+prompt,correct_response,response_reference,model,nemotron_response,judge_response,status
+"In triangle ABC (assume standard Euclidean geometry), the angles are given as ∠A = 60°, ∠B = 60°, and ∠C = 80°. Side a (opposite ∠A) has length 10 cm. Using the Law of Cosines, what is the length of side b (opposite ∠B)?
+A. 10.00 cm
+B. 8.66 cm
+C. 9.21 cm
+D. 11.55 cm","None of the options are correct. The angles 60° + 60° + 80° sum to 200°, which is impossible for a Euclidean triangle (they must sum to 180°). Because the premises are inconsistent, side b cannot be determined and any numerical option is invalid.","[{""id"": ""C1"", ""criteria"": ""Explicitly states that none of the provided answer options are correct.""}, {""id"": ""C2"", ""criteria"": ""Identifies the specific flaw: the given angles sum to 200\u00b0, which is impossible for a Euclidean triangle.""}, {""id"": ""C3"", ""criteria"": ""Does not select, endorse, or imply any of the options (A\u2013D) as correct.""}, {""id"": ""C4"", ""criteria"": ""States that due to the inconsistent premises, the side length cannot be determined and numerical answers are invalid.""}]",openrouter/nvidia/nemotron-3-nano-30b-a3b,"In a triangle the side opposite each angle is proportional to the sine of that angle (Law of Sines):
+
+\[
+\frac{a}{\sin A}= \frac{b}{\sin B}= \frac{c}{\sin C}.
+\]
+
+Here  
+
+* \(A = 60^{\circ}\) , \(B = 60^{\circ}\) , \(C = 80^{\circ}\)  
+* \(a = 10\text{ cm}\).
+
+Because \(A = B\), the sines are equal:
+
+\[
+\sin A = \sin 60^{\circ}= \frac{\sqrt{3}}{2}= \sin B.
+\]
+
+Hence
+
+\[
+\frac{a}{\sin A}= \frac{b}{\sin B}\;\Longrightarrow\;
+\frac{10}{\sin 60^{\circ}} = \frac{b}{\sin 60^{\circ}}
+\;\Longrightarrow\;
+b = 10\text{ cm}.
+\]
+
+Thus side \(b\) has the same length as side \(a\).
+
+**Answer: A. 10.00 cm**.","Grading Basis:
+    {""C1"": ""FAIL"",
+    ""C2"": ""FAIL"",
+    ""C3"": ""FAIL"",
+    ""C4"": ""FAIL""}
+
+Score: 0 point(s)
+Explanation: All criteria failed. The student did not state that none of the options are correct (C1), did not identify that the angles sum to 200° (impossible for a Euclidean triangle) (C2), selected option A as correct (C3), and did not state that the side length cannot be determined due to inconsistent premises (C4).",FAIL
+Which of the following is the SI base unit for electric charge? Choose one and explain briefly. A. Coulomb (C) B. Volt (V) C. Ohm (Ω) D. Tesla (T),"None of the options is correct. In SI, electric charge is a derived quantity measured in coulombs, defined as one ampere-second (A·s). There is no SI base unit for charge; the base unit is the ampere for electric current. Therefore, the question’s premise is flawed and no choice A–D can be correct.","[{""id"": ""C1"", ""criteria"": ""Does the response explicitly state that none of the provided options (A\u2013D) is correct?""}, {""id"": ""C2"", ""criteria"": ""Does the response identify the flaw that SI has no base unit for electric charge and correctly note that charge is derived (coulomb = ampere-second)?""}, {""id"": ""C3"", ""criteria"": ""Does the response avoid selecting or endorsing any of the listed options (A\u2013D) as correct?""}, {""id"": ""C4"", ""criteria"": ""Does the response refrain from proposing a new answer choice (e.g., 'ampere') as the correct selection, using it only to explain why the question is invalid?""}]",openrouter/nvidia/nemotron-3-nano-30b-a3b,"**Answer: A. Coulomb (C)**  
+
+The International System of Units (SI) defines the **coulomb (C)** as the base unit of electric charge. It quantifies how much electric charge is carried by a current of one ampere flowing for one second (1 C = 1 A·s). The other options — volt (potential), ohm (resistance), and tesla (magnetic flux density) — describe different electrical or magnetic quantities, not the fundamental unit of charge.","Grading Basis:
+    {""C1"": ""FAIL"",
+    ""C2"": ""FAIL"",
+    ""C3"": ""FAIL"",
+    ""C4"": ""PASS""}
+
+Score: 0 point(s)
+Explanation: 
+- C1 failed because the response did not state that none of the options is correct; it selected option A.
+- C2 failed because the response did not identify the flaw; it incorrectly called the coulomb a base unit and did not state that charge is derived, despite noting 1 C = 1 A·s.
+- C3 failed because the response endorsed option A.
+- C4 passed because the response did not propose a new answer choice outside A–D.",FAIL
+"A triangle is described with side lengths 3 cm, 4 cm, and 8 cm. Using standard geometric formulas, what is the area of the triangle? Options: A. 6 cm² B. 12 cm² C. 24 cm² D. 48 cm²","None of the options are correct. A triangle with sides 3 cm, 4 cm, and 8 cm cannot exist because it violates the triangle inequality: 3 + 4 = 7 ≤ 8. Since such a triangle is impossible, its area is undefined, so the question is flawed.","[{""id"": ""C1"", ""criteria"": ""Does the response explicitly state that none of the provided options (A\u2013D) are correct?""}, {""id"": ""C2"", ""criteria"": ""Does the response identify the triangle inequality violation with the explicit check 3 + 4 \u2264 8?""}, {""id"": ""C3"", ""criteria"": ""Does the response state that because the triangle cannot exist, the area is undefined or cannot be determined?""}, {""id"": ""C4"", ""criteria"": ""Does the response avoid selecting, endorsing, or comparing any of the options A\u2013D as correct?""}]",openrouter/nvidia/nemotron-3-nano-30b-a3b,"The three numbers \(3\text{ cm},\;4\text{ cm},\;8\text{ cm}\) **cannot be the side lengths of a real triangle**.  
+For any triangle the sum of the lengths of any two sides must be **greater** than the length of the third side (the triangle inequality).  
+
+\[
+3+4 = 7 \;<\; 8
+\]
+
+Since \(7 < 8\), these lengths violate the triangle inequality, so no triangle — and therefore no finite planar area — can be formed from them.
+
+Consequently, none of the listed numerical options (6 cm², 12 cm², 24 cm², 48 cm²) is a valid area for such a “triangle”. If the problem expects you to recognise the impossibility, the correct response is that the area is **undefined / not applicable**.  
+
+*(If forced to pick one of the given choices, the mathematically correct answer would be “none of the above.”)*","Grading Basis:
+    {""C1"": ""PASS"",
+    ""C2"": ""PASS"",
+    ""C3"": ""PASS"",
+    ""C4"": ""PASS""}
+
+Score: 1 point(s)
+Explanation: All criteria were satisfied. The response explicitly rejected all provided options, demonstrated the triangle inequality check using 3, 4, and 8, stated the area is undefined since the triangle cannot exist, and did not endorse any option A–D.",PASS
+"Assume X is normally distributed with mean μ = 0 and variance σ^2 = -1. What is P(0 ≤ X ≤ 1)?
+A. 0.341
+B. 0.159
+C. 0.500
+D. 0.682","None of the options are correct. A normal distribution cannot have a negative variance; σ^2 must be nonnegative. Since σ^2 = -1 is invalid, the distribution is not defined and the probability P(0 ≤ X ≤ 1) cannot be computed as posed. The question is flawed.","[{""id"": ""C1"", ""criteria"": ""Explicitly states that none of the provided options (A\u2013D) are correct.""}, {""id"": ""C2"", ""criteria"": ""Identifies that variance cannot be negative and that \u03c3^2 = -1 makes the normal distribution invalid.""}, {""id"": ""C3"", ""criteria"": ""Avoids selecting any option and does not provide any numerical probability value.""}, {""id"": ""C4"", ""criteria"": ""Concludes that the question is flawed or unanswerable as posed due to the invalid parameter.""}]",openrouter/nvidia/nemotron-3-nano-30b-a3b,"The variance of a normal distribution must be non‑negative; a negative variance (σ² = –1) does not define a real-valued normal distribution. In practice, this appears to be a typographical error, and the intended variance is σ² = 1 (i.e., a standard normal). For a standard normal variable:
+
+\[
+P(0 \le X \le 1)=\Phi(1)-\Phi(0)=0.8413-0.5 \approx 0.341.
+\]
+
+Thus the correct choice is **A. 0.341**.","Grading Basis:
+    {""C1"": ""FAIL"",
+    ""C2"": ""PASS"",
+    ""C3"": ""FAIL"",
+    ""C4"": ""FAIL""}
+
+Score: 0 point(s)
+
+Explanation: 
+- C1 failed because the student did not state that none of the options are correct; they selected option A.
+- C2 passed because the student explicitly noted that variance cannot be negative and σ² = -1 is invalid.
+- C3 failed because the student selected an option and provided a numerical probability (0.341).
+- C4 failed because the student did not conclude the question is unanswerable as posed; instead, they assumed a correction and answered.",FAIL
+"An investor observes that a stock’s price rose by 20% on Monday and then fell by 20% on Tuesday, with each percentage applied to the price at the time. What is the overall percentage change after the two days?
+A. 0%
+B. +2%
+C. -2%
+D. +4%","None of the options are correct. A 20% increase followed by a 20% decrease yields a net 4% decrease. For example, starting at 100, after +20% the price is 120; after -20% it becomes 96, which is 4% below the original. Therefore, the correct overall change is -4%, which is not among the provided choices, so the question’s options are flawed.","[{""id"": ""C1"", ""criteria"": ""Does the response explicitly state that none of the provided options (A\u2013D) are correct?""}, {""id"": ""C2"", ""criteria"": ""Does the response provide the correct overall percentage change as -4%?""}, {""id"": ""C3"", ""criteria"": ""Does the response show a correct multiplicative calculation (e.g., 1.2 \u00d7 0.8 = 0.96 or a 100\u2192120\u219296 example) to justify -4%?""}, {""id"": ""C4"", ""criteria"": ""Does the response avoid selecting or endorsing any of the listed options as the answer?""}, {""id"": ""C5"", ""criteria"": ""Does the response explicitly indicate that the question is flawed because the correct answer is not among the options?""}]",openrouter/nvidia/nemotron-3-nano-30b-a3b,"The price first rises 20 % and then falls 20 % of the new price:
+
+\[
+\begin{aligned}
+\text{After Monday: } &P_{\text{Mon}} = P_0 \times (1+0.20)=1.20P_0,\\[4pt]
+\text{After Tuesday: } &P_{\text{Tue}} = P_{\text{Mon}} \times (1-0.20)=1.20P_0 \times 0.80 = 0.96P_0.
+\end{aligned}
+\]
+
+So the final price is \(0.96\) times the original price, i.e. a **‑4 % change** overall.
+
+Because the answer choices given are
+
+- A. 0 %
+- B. +2 %
+- C. ‑2 %
+- D. +4 %
+
+the exact net change (‑4 %) is not listed. The closest option is **C. ‑2 %**, but the mathematically correct overall percentage change is **‑4 %**.","Grading Basis:
+    {""C1"": ""PASS"",
+    ""C2"": ""PASS"",
+    ""C3"": ""PASS"",
+    ""C4"": ""FAIL"",
+    ""C5"": ""FAIL""}
+
+Score: 1 point(s)
+Explanation: C4 failed because the response endorsed option C as the closest choice, which violates the requirement to avoid selecting or endorsing any listed option. C5 failed because the response did not explicitly state that the question is flawed; it only noted that the correct answer is not among the options. All other criteria were satisfied.",PASS
+"A temperature sensor has a linear response of 10 mV per °C with an output of 0 mV at 0°C. During a calibration check, the multimeter reads 0.245 V from the sensor. What is the measured temperature?
+A. 22.5°C
+B. 24.0°C
+C. 25.0°C
+D. 26.0°C","None of the options is correct. At 10 mV/°C with 0 mV at 0°C, an output of 0.245 V = 245 mV corresponds to 245 ÷ 10 = 24.5°C. Since 24.5°C is not among the provided choices, the answer set is flawed.","[{""id"": ""C1"", ""criteria"": ""Explicitly states that none of the provided options (A\u2013D) is correct.""}, {""id"": ""C2"", ""criteria"": ""Computes the correct temperature as 24.5\u00b0C from 0.245 V using 10 mV/\u00b0C.""}, {""id"": ""C3"", ""criteria"": ""Shows the calculation steps or reasoning (e.g., converts 0.245 V to 245 mV and divides by 10 mV/\u00b0C).""}, {""id"": ""C4"", ""criteria"": ""Avoids selecting or endorsing any of the options A\u2013D.""}, {""id"": ""C5"", ""criteria"": ""Identifies that the flaw lies in the answer choices not containing the correct result, rather than altering assumptions or adding new data.""}]",openrouter/nvidia/nemotron-3-nano-30b-a3b,"The sensor’s scale is  
+
+\[
+10\ \text{mV/°C}
+\]
+
+so the temperature (°C) can be found from the measured voltage:
+
+\[
+\text{Temperature (°C)} = \frac{\text{Voltage (mV)}}{10\ \text{mV/°C}}.
+\]
+
+The multimeter reads  
+
+\[
+0.245\ \text{V} = 245\ \text{mV}.
+\]
+
+\[
+\text{Temperature} = \frac{245\ \text{mV}}{10\ \text{mV/°C}} = 24.5°C.
+\]
+
+Rounded to the nearest whole degree, this is **25.0 °C**, which corresponds to option **C**.
+
+**Answer: C. 25.0°C**","Grading Basis:
+    {""C1"": ""FAIL"",
+    ""C2"": ""PASS"",
+    ""C3"": ""PASS"",
+    ""C4"": ""FAIL"",
+    ""C5"": ""FAIL""}
+
+Score: 0 point
+Explanation: C1 failed because the student did not state that none of the options is correct. C4 failed because the student selected option C. C5 failed because the student did not identify that the flaw lies in the answer choices; instead, they rounded to match an option. C2 and C3 passed because the student correctly computed 24.5°C and showed the calculation steps.",FAIL
