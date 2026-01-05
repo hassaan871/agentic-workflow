@@ -247,55 +247,96 @@ for run_idx in range(RUNS):
         
         data_qc = json.loads(qc_agent_response.output_text)
         
-        # --- Layer 2: Nemotron responds to the prompt --- 
-        print("Layer 2: Nemotron Solve the QC task")
-        qc_nemotron_response = client.responses.create(
-            model="openrouter/nvidia/nemotron-3-nano-30b-a3b",
-            input=data_qc["prompt"]
-        )
-
-        print(qc_nemotron_response.output_text)
-        print("----------------------------------")
-        
-        # --- Layer 3: Judge Nemotron Response ---
-        print("Layer 3: Judge Layer")
+        # --- Layer 2: Get 4 responses from Agent02 to the same prompt ---
+        print("Layer 2: Nemotron Solve the QC task (4 attempts)")
         qc_response_reference = data_qc["response_reference"]
         qc_response_reference_json = json.dumps(qc_response_reference)
         
-        qc_judge_system_prompt = JUDGE_PROMPT_TEMPLATE.format(
-            STUDENT_ANSWER=qc_nemotron_response.output_text,
-            STANDARD_CRITERIA=qc_response_reference_json
-        )
+        # Store all 4 attempts' data
+        nemotron_responses = []      # All 4 Agent02 responses
+        judge_responses = []         # All 4 judge outputs
+        individual_statuses = []     # PASS/FAIL for each attempt
         
-        qc_judge_response = client.responses.create(
-            model="gpt-5",
-            input=qc_judge_system_prompt
-        )
-
-        print("\nJudge Layer Output:") 
-        print(qc_judge_response.output_text)
-        print("------------------------------")
+        # Loop 4 times: get response and judge it immediately
+        for attempt in range(4):
+            print(f"\n--- Attempt {attempt + 1}/4 ---")
+            # Get Agent02 response (same prompt each time)
+            qc_nemotron_response = client.responses.create(
+                model="openrouter/nvidia/nemotron-3-nano-30b-a3b",
+                input=data_qc["prompt"]
+            )
+            
+            print(f"Response {attempt + 1}:")
+            print(qc_nemotron_response.output_text)
+            print("----------------------------------")
+            
+            nemotron_responses.append(qc_nemotron_response.output_text)
+            
+            # --- Layer 3: Judge this attempt's response ---
+            print(f"Layer 3: Judge Layer (Attempt {attempt + 1})")
+            qc_judge_system_prompt = JUDGE_PROMPT_TEMPLATE.format(
+                STUDENT_ANSWER=qc_nemotron_response.output_text,
+                STANDARD_CRITERIA=qc_response_reference_json
+            )
+            
+            qc_judge_response = client.responses.create(
+                model="gpt-5",
+                input=qc_judge_system_prompt
+            )
+            
+            print(f"\nJudge Layer Output (Attempt {attempt + 1}):") 
+            print(qc_judge_response.output_text)
+            print("------------------------------")
+            
+            judge_responses.append(qc_judge_response.output_text)
+            
+            # Check if this attempt passed (1 point) or failed (0 point)
+            attempt_status = "PASS" if "1 point" in qc_judge_response.output_text else "FAIL"
+            individual_statuses.append(attempt_status)
+            print(f"Attempt {attempt + 1} Status: {attempt_status}")
         
-        # Determine pass/fail from judge (simplified example)
-        status = "PASS" if "1 point" in qc_judge_response.output_text else "FAIL"
+        # Final decision: Model breaking only if 3+ out of 4 attempts failed
+        fail_count = individual_statuses.count("FAIL")
+        final_status = "FAIL" if fail_count >= 3 else "PASS"
         
-        # ------------------- SAVE TO CSV -------------------
-        with open(file_path, mode='a', newline='', encoding='utf-8') as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=[
-                "prompt", "correct_response", "response_reference",
-                "model", "nemotron_response", "judge_response", "status"
-            ])
-            writer.writerow({
-                "prompt": data_qc.get("prompt", ""),
-                "correct_response": data_qc.get("correct_response", ""),
-                "response_reference": json.dumps(data_qc.get("response_reference", [])),
-                "model": "openrouter/nvidia/nemotron-3-nano-30b-a3b",
-                "nemotron_response": qc_nemotron_response.output_text,
-                "judge_response": qc_judge_response.output_text,
-                "status": status
-            })
-
-        print(f"Task saved to {file_name} with status {status}.")
+        print(f"\n========== FINAL RESULTS ==========")
+        print(f"Individual Statuses: {individual_statuses}")
+        print(f"FAIL count: {fail_count}/4")
+        print(f"Final Status: {final_status} (Model Breaking: {'YES' if final_status == 'FAIL' else 'NO'})")
+        print("===================================\n")
+        
+        # --- Save to CSV only if model breaking (3+ failures) ---
+        if final_status == "FAIL":
+            print(f"✓ Model Breaking detected! Saving to {file_name}...")
+            with open(file_path, mode='a', newline='', encoding='utf-8') as csv_file:
+                writer = csv.DictWriter(csv_file, fieldnames=[
+                    "prompt", "correct_response", "response_reference",
+                    "model", "nemotron_response", "judge_response", "status"
+                ])
+                
+                writer.writerow({
+                    "prompt": data_qc.get("prompt", ""),
+                    "correct_response": data_qc.get("correct_response", ""),
+                    "response_reference": json.dumps(data_qc.get("response_reference", [])),
+                    "model": "openrouter/nvidia/nemotron-3-nano-30b-a3b",
+                    # Store all 4 responses as JSON: {"attempt_1": "...", "attempt_2": "...", ...}
+                    "nemotron_response": json.dumps({
+                        f"attempt_{i+1}": resp for i, resp in enumerate(nemotron_responses)
+                    }),
+                    # Store all 4 judge outputs as JSON: {"attempt_1": {"judge_output": "...", "status": "FAIL"}, ...}
+                    "judge_response": json.dumps({
+                        f"attempt_{i+1}": {
+                            "judge_output": judge_responses[i],
+                            "status": individual_statuses[i]
+                        } for i in range(4)
+                    }),
+                    "status": final_status
+                })
+            
+            print(f"✓ Task saved to {file_name} with status {final_status}.")
+        else:
+            # Skip saving if not model breaking (0, 1, or 2 failures)
+            print(f"✗ Not model breaking ({fail_count}/4 failures). Skipping CSV save.")
         
     except Exception as e:
         print("Error:", e)
