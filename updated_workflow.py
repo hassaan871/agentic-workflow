@@ -114,7 +114,6 @@ SYSTEM_PROMPT_QC = f"""
             {{ "id": "C2", "criteria2": "Does the response explicitly state that the reported total increase of 45 ppm is inconsistent with the stated average annual increase?" }},
             {{ "id": "C3", "criteria3": "Does the response avoid choosing an answer based on closeness, approximation, rounding, or plausibility rather than exact calculation?" }},
             {{ "id": "C4", "criteria4": "Does the response avoid selecting, endorsing, or justifying any single option as the correct answer?" }},
-            {{ "id": "C5", "criteria5": "Does the response avoid introducing alternative data, assumptions, or corrected values not explicitly stated in the prompt?" }}
             ]
         }},
         {{
@@ -126,7 +125,6 @@ SYSTEM_PROMPT_QC = f"""
             {{ "id": "C3", "criteria3": "Does the response avoid selecting, endorsing, or comparing any of the answer options A–D?" }},
             {{ "id": "C4", "criteria4": "Does the response remain concise and focused without introducing unrelated explanations or speculative commentary?" }}
             ],
-            "note": "The response_reference array can contain 3 to 5 criteria depending on the prompt scenario; 4 criteria are used here as an example."
         }},
         {{
             "prompt": "A science post states that a laboratory reviewed the ratio of successful experiments to failed experiments after upgrading its testing equipment. It was recorded in the post that the laboratory had 14 successful trials and 11 failed trials during a testing cycle, this ratio is now referenced.
@@ -142,7 +140,6 @@ SYSTEM_PROMPT_QC = f"""
             {{ "id": "C3", "criteria3": "Does it indicate that 14 : 11 is in it’s simplest form?" }},
             {{ "id": "C4", "criteria4": "Does it explicitly state the ratio 14 : 11 does not correspond to any of the provided answer options?" }}
             ],
-            "note": "The response_reference array can contain 3 to 5 criteria depending on the prompt scenario; 4 criteria are used here as an example."
         }},
         {{
             "prompt": "A company's data indicated a quarterly revenue of 8,000 dollars and costs of 6,000 dollars. Select the profit margin percentage from these choices.
@@ -158,7 +155,6 @@ SYSTEM_PROMPT_QC = f"""
             {{ "id": "C4", "criteria4": "Does the response conclude that there is an error in the question or the options?" }},
             {{ "id": "C5", "criteria5": "Does the response avoid selecting or recommending any of the options (A, B, C, D) as the answer?" }}
             ],
-            "note": "The response_reference array can contain 3 to 5 criteria depending on the prompt scenario; 4 criteria are used here as an example."
         }},
         {{
             "prompt": "In a chemical reaction, 2 moles of hydrogen gas react with 1 mole of oxygen gas to produce water. If you start with 8 moles of hydrogen, how many moles of water are produced?
@@ -170,7 +166,6 @@ SYSTEM_PROMPT_QC = f"""
             {{ "id": "C3", "criteria3": "Does the answer avoid selecting, endorsing, or labeling any of the provided options (A, B, C, or D) as the correct answer?" }},
             {{ "id": "C4", "criteria4": "Does the answer identify that the question contains a flaw in its answer options rather than attempting to select the closest or most plausible option?" }}
             ],
-            "note": "The response_reference array can contain 3 to 5 criteria depending on the prompt scenario; 4 criteria are used here as an example."
         }},
     ]
 
@@ -298,8 +293,11 @@ def create_refinement_feedback(data_qc, criteria_failures, judge_responses, nemo
     
     Analyzes which criteria are passing/failing and provides targeted improvement instructions.
     Separates criteria into two groups:
-    - Needs improvement: Criteria failing < 3 times (make them fail more)
-    - Keep intact: Criteria failing 3+ times (maintain their failing)
+    - Needs improvement: Criteria failing < 3 times (prompt needs refinement)
+    - Keep intact: Criteria failing 3+ times (maintain their constraints)
+    
+    Focus: Refine the PROMPT using Question Correction techniques, let criteria naturally align.
+    DO NOT artificially make criteria stricter or break logical consistency.
     
     Includes CRITERIA_DESIGN_RULES to ensure criteria stay non-overlapping.
     """
@@ -347,19 +345,19 @@ def create_refinement_feedback(data_qc, criteria_failures, judge_responses, nemo
     # Add criteria needing improvement
     if needs_improvement:
         feedback += """
-    CRITERIA TO IMPROVE (make them fail more often):
+    CRITERIA THAT NEED PROMPT REFINEMENT (prompt is not challenging enough):
     """
         for item in needs_improvement:
             feedback += f"""
     - {item['id']}: Currently failing {item['fail_count']}/4 times (passed {item['pass_count']} times)
       Current criteria: {item['text']}
-      Action: Make the prompt harder so this criteria fails more often, and make this criteria stricter
-    """
+      Issue: The prompt's flaw is too easily detectable or the model can satisfy this criteria too easily
+      """
     
     # Add criteria working well
     if keep_intact:
         feedback += """
-    CRITERIA TO KEEP INTACT (maintain their failing):
+    CRITERIA WORKING WELL (maintain their prompt constraints):
     """
         for item in keep_intact:
             feedback += f"""
@@ -373,21 +371,69 @@ def create_refinement_feedback(data_qc, criteria_failures, judge_responses, nemo
     
     {CRITERIA_DESIGN_RULES}
     
+    QUESTION CORRECTION REFINEMENT TECHNIQUES:
+    
+    When refining the prompt for criteria that need improvement, use these specific techniques:
+    
+    1. STRENGTHEN THE HIDDEN FLAW (while maintaining logical consistency):
+       - For calculation errors: Make the error more subtle (e.g., off by a small amount, wrong formula application)
+       - For contradictory premises: Add more context that makes the contradiction less obvious
+       - For factually incorrect assumptions: Embed the false assumption more naturally in the narrative
+       - For all-options-incorrect: Make the options more plausible-looking (closer to correct answer)
+    
+    2. ADD DISTRACTING CONTEXT (without breaking logic):
+       - Add relevant but non-essential background information
+       - Include multiple data points that don't affect the core flaw
+       - Use domain-appropriate terminology that might mislead
+       - Add intermediate steps or calculations that are correct but lead to flawed conclusion
+    
+    3. MAKE THE FLAW MORE SUBTLE (but still detectable):
+       - Instead of obvious errors, use near-correct values
+       - Instead of clear contradictions, use implicit inconsistencies
+       - Instead of blatant falsehoods, use plausible-sounding but incorrect statements
+    
+    4. PRESERVE LOGICAL CONSISTENCY:
+       - The flaw must still be detectable through careful reasoning
+       - The question must still appear legitimate at first glance
+       - All premises must be internally consistent except for the specific hidden flaw
+       - Do NOT introduce multiple unrelated flaws or break the question structure
+    
     YOUR TASK:
+    
     1. For criteria needing improvement:
-       - Update the prompt to make it harder (add complexity, misleading context, etc.)
-       - Make those criteria stricter (harder to pass) but follow the design rules above
-       - Ensure prompt and criteria stay aligned
+       - Use the Question Correction refinement techniques above to make the prompt's flaw more subtle
+       - Focus on the specific flaw type in your current prompt (calculation error, contradiction, false assumption, or all-options-incorrect)
+       - Make the flaw harder to detect while maintaining logical consistency
     
     2. For criteria working well:
        - Keep the prompt constraints that make them fail
        - Keep those criteria unchanged
     
-    3. Update correct_response to match the new prompt
+    3. Update correct_response to match the refined prompt:
+       - Abstract the response based on the new prompt's flaw
+       - Do NOT copy the old correct_response verbatim
+       - Ensure it addresses the refined flaw appropriately
     
-    4. Ensure all criteria follow the design rules (no overlap, self-contained)
+    4. Update criteria to reflect the refined prompt's constraints:
+       - Criteria should align with what the refined prompt requires
+       - If the prompt's flaw becomes more subtle, criteria should reflect that subtlety
     
-    5. Keep the Question Correction category (hidden flaw, all options incorrect)
+    5. Ensure all criteria follow the design rules (no overlap, self-contained)
+    
+    6. Maintain Question Correction category:
+       - Hidden flaw must remain (all options incorrect, logical inconsistency, factual error, or calculation error)
+       - Question must still appear legitimate at first glance
+       - Flaw must be detectable through careful reasoning
+    
+    CRITICAL CONSTRAINTS:
+    - DO NOT break logical consistency - the flaw must be a single, specific, detectable issue
+    - DO NOT artificially make criteria stricter - criteria should naturally reflect the refined prompt's constraints
+    - DO NOT introduce multiple unrelated flaws
+    - DO NOT make the question obviously broken or nonsensical
+    - The refined prompt must still be a valid Question Correction example
+    
+    The prompt and criteria are linked via constraints. When you refine the prompt's flaw to be more subtle,
+    the criteria should naturally evolve to reflect that subtlety.
     
     Output updated JSON.
     """
@@ -581,8 +627,8 @@ else:
 if not os.path.exists(file_path):
     with open(file_path, mode='w', newline='', encoding='utf-8') as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=[
-            "taxonomy", "prompt", "correct_response", "response_reference",
-            "model", "nemotron_response", "judge_response", "status",
+            "taxonomy", "agent_01_model", "prompt", "correct_response", "response_reference",
+            "agent_02_model", "agent_02_response", "judge_response", "status",
             "embedding", "max_similarity"
         ])
         writer.writeheader()
@@ -776,19 +822,20 @@ for run_idx in range(RUNS):
                 # Save to CSV
                 with open(file_path, mode='a', newline='', encoding='utf-8') as csv_file:
                     writer = csv.DictWriter(csv_file, fieldnames=[
-                        "taxonomy", "prompt", "correct_response", "response_reference",
-                        "model", "nemotron_response", "judge_response", "status",
+                        "taxonomy", "agent_01_model", "prompt", "correct_response", "response_reference",
+                        "agent_02_model", "agent_02_response", "judge_response", "status",
                         "embedding", "max_similarity"
                     ])
                     
                     writer.writerow({
                         "taxonomy": TAXONOMY,  # Store selected taxonomy
+                        "agent_01_model": "openrouter/nvidia/nemotron-3-nano-30b-a3b",
                         "prompt": new_prompt,
                         "correct_response": data_qc.get("correct_response", ""),
                         "response_reference": json.dumps(data_qc.get("response_reference", [])),
-                        "model": "openrouter/nvidia/nemotron-3-nano-30b-a3b",
+                        "agent_02_model": "openrouter/nvidia/nemotron-3-nano-30b-a3b",
                         # Store all 4 responses as JSON: {"attempt_1": "...", "attempt_2": "...", ...}
-                        "nemotron_response": json.dumps({
+                        "agent_02_response": json.dumps({
                             f"attempt_{i+1}": resp for i, resp in enumerate(nemotron_responses)
                         }),
                         # Store all 4 judge outputs as JSON: {"attempt_1": {"judge_output": "...", "status": "FAIL"}, ...}
