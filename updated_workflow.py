@@ -209,6 +209,31 @@ JUDGE_PROMPT_TEMPLATE = """
             Explanation: Explain briefly which criteria failed and why. If no criteria failed, explicitly state that all criteria were satisfied.
     """
 
+AGENT01_VALIDATION_PROMPT_TEMPLATE = """
+    You are a validation agent tasked with evaluating Agent01's generated output.
+    Your role is to check if the correct_response properly aligns with the response_reference criteria.
+    
+    CORRECT_RESPONSE:
+    {CORRECT_RESPONSE}
+    
+    RESPONSE_REFERENCE (Evaluation Criteria):
+    {RESPONSE_REFERENCE}
+    
+    YOUR TASK:
+    1. Evaluate if the correct_response addresses all criteria in response_reference
+    2. Check if the correct_response is logically consistent with the criteria
+    3. Verify that the correct_response would satisfy the evaluation criteria
+    
+    REQUIRED OUTPUT FORMAT:
+    Output MUST be valid JSON only, following this exact structure:
+    {{
+        "status": "PASS" or "FAIL",
+        "remarks": "Detailed explanation of your evaluation. If FAIL, explain what is missing or misaligned. If PASS, confirm alignment."
+    }}
+    
+    Do NOT include explanations, markdown, or extra text outside the JSON.
+"""
+
 # Output format note for refinement (no "generate NEW" instruction)
 OUTPUT_FORMAT_NOTE = """
     Output Format:
@@ -628,6 +653,7 @@ if not os.path.exists(file_path):
     with open(file_path, mode='w', newline='', encoding='utf-8') as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=[
             "taxonomy", "agent_01_model", "prompt", "correct_response", "response_reference",
+            "agent_01_judge_model", "agent_01_judge_model_remarks", "agent_01_correct_response_status",
             "agent_02_model", "agent_02_response", "judge_response", "status",
             "embedding", "max_similarity"
         ])
@@ -678,6 +704,32 @@ for run_idx in range(RUNS):
             print("------------------------------------")
             
             data_qc = json.loads(qc_agent_response.output_text)
+            
+            # --- Validation Layer: Agent01 Judge evaluates Agent01's output ---
+            print("Validation Layer: Agent01 Judge evaluating Agent01's output...")
+            
+            agent01_validation_prompt = AGENT01_VALIDATION_PROMPT_TEMPLATE.format(
+                CORRECT_RESPONSE=data_qc.get("correct_response", ""),
+                RESPONSE_REFERENCE=json.dumps(data_qc.get("response_reference", []))
+            )
+            
+            agent01_validation_response = client.responses.create(
+                model="gpt-5",
+                input=agent01_validation_prompt
+            )
+            
+            print("Agent01 Validation Response: ")
+            print(agent01_validation_response.output_text)
+            print("------------------------------------")
+            
+            # Parse validation JSON
+            validation_result = json.loads(agent01_validation_response.output_text)
+            agent01_judge_status = validation_result.get("status", "FAIL")
+            agent01_judge_remarks = validation_result.get("remarks", "")
+            
+            print(f"Agent01 Validation Status: {agent01_judge_status}")
+            print(f"Agent01 Validation Remarks: {agent01_judge_remarks}")
+            print("------------------------------------")
             
             # --- Layer 2: Get 4 responses from Agent02 to the same prompt ---
             print("Layer 2: Nemotron Solve the QC task (4 attempts)")
@@ -823,6 +875,7 @@ for run_idx in range(RUNS):
                 with open(file_path, mode='a', newline='', encoding='utf-8') as csv_file:
                     writer = csv.DictWriter(csv_file, fieldnames=[
                         "taxonomy", "agent_01_model", "prompt", "correct_response", "response_reference",
+                        "agent_01_judge_model", "agent_01_judge_model_remarks", "agent_01_correct_response_status",
                         "agent_02_model", "agent_02_response", "judge_response", "status",
                         "embedding", "max_similarity"
                     ])
@@ -833,6 +886,9 @@ for run_idx in range(RUNS):
                         "prompt": new_prompt,
                         "correct_response": data_qc.get("correct_response", ""),
                         "response_reference": json.dumps(data_qc.get("response_reference", [])),
+                        "agent_01_judge_model": "gpt-5",
+                        "agent_01_judge_model_remarks": agent01_judge_remarks,
+                        "agent_01_correct_response_status": agent01_judge_status,
                         "agent_02_model": "openrouter/nvidia/nemotron-3-nano-30b-a3b",
                         # Store all 4 responses as JSON: {"attempt_1": "...", "attempt_2": "...", ...}
                         "agent_02_response": json.dumps({
