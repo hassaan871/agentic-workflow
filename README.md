@@ -439,6 +439,92 @@ If `--runs` is missing or invalid, the script prints usage via `argparse` and ex
 
 ## Key Design Decisions
 
+### Visual Workflow Diagram
+
+The diagram below summarizes the full agentic architecture from CLI to CSV:
+
+```text
+               CLI
+  python updated_workflow.py
+        --runs / --max-iterations
+                       │
+                       ▼
+          +------------------------+
+          |  Taxonomy Controller   |
+          | (TAXONOMY_RUNS / MAX_) |
+          +------------------------+
+           │    │          │
+           │    │          │
+           ▼    ▼          ▼
+         qc   itf         mim
+   (one loop per taxonomy-id)
+
+For each taxonomy-id:
+
+  FOR each run:
+    ┌───────────────────────────────────────────────────────┐
+    │  Iteration Loop (1 .. MAX_ITERATIONS[taxonomy-id])   │
+    └───────────────────────────────────────────────────────┘
+                 │
+                 ▼
+        ┌───────────────────────┐
+        │ Agent01 (Nemotron)    │
+        │  - iteration 1:       │
+        │      SYSTEM_PROMPT_*  │
+        │  - iteration >1:      │
+        │      create_refinement│
+        └───────────┬───────────┘
+                    │
+                    ▼
+        ┌───────────────────────┐
+        │ data_qc JSON          │
+        │  - taxonomy           │
+        │  - prompt             │
+        │  - correct_response   │
+        │  - response_reference │
+        └───────────┬───────────┘
+                    │
+                    ▼
+        ┌─────────────────────────────┐
+        │ Agent01 Judge (GPT‑5)       │
+        │  - validates correct_       │
+        │    response vs criteria     │
+        │  - outputs {status,remarks} │
+        └───────────┬────────────────┘
+                    │
+                    ▼
+        ┌─────────────────────────────┐
+        │ Agent02 + Judge (4 attempts)│
+        │  LOOP 4x:                   │
+        │    Agent02 (Nemotron)       │
+        │      → answer(prompt)       │
+        │    Judge (GPT‑5)            │
+        │      → grade vs criteria    │
+        │    → attempt PASS / FAIL    │
+        └───────────┬────────────────┘
+                    │
+                    ▼
+        ┌─────────────────────────────┐
+        │ Analysis                    │
+        │  - individual_statuses (4)  │
+        │  - fail_count = FAILs       │
+        │  - criteria_failures        │
+        └───────────┬────────────────┘
+                    │
+     fail_count ≥ 3 │     fail_count < 3
+        (3+ fails)  │
+                    │
+        ▼           ▼
+  ┌───────────────────────────┐      ┌───────────────────────────┐
+  │ Save & Exit Run           │      │ More Iterations?          │
+  │  - compute embedding      │      │  - if iteration < max:    │
+  │  - compute max_similarity │      │      create_refinement    │
+  │  - append CSV row         │      │      (taxonomy-aware)     │
+  └───────────────────────────┘      │      → next iteration     │
+                                     │  - else: stop run         │
+                                     └───────────────────────────┘
+```
+
 ### Multi-Taxonomy, Single Script
 
 - All taxonomy prompts (`SYSTEM_PROMPT_QC`, `SYSTEM_PROMPT_ITF`, `SYSTEM_PROMPT_MIM`) live directly in `updated_workflow.py`.
