@@ -11,7 +11,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 API_KEY = "sk-NMqHr2L2nqIOyZFgynUR9w"
 BASE_URL = "http://34.72.104.120"
 # CSV file name (shared across all taxonomies)
-file_name = "mim_data.csv"
+file_name = "dia_data.csv"
 
 # CSV file path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -521,11 +521,519 @@ Provide a procedural explanation of how to conduct a systematic literature revie
     BEGIN
 """
 
+SYSTEM_PROMPT_CCF = f"""
+    {PROMPT_HEADER}
+    Counter-Conventional Formatting (CCF):
+    
+    Definition:
+    Instructions that require content to be presented in formats that VIOLATE standard structuring conventions. The challenge is purely FORMATTING-based, not content-based.
+    
+    Training Paradigm Violated:
+    Standard SFT: Models are trained to use structured formats (bullets, lists, clear paragraphs, headers) to enhance readability. Annotators are taught to organize information clearly with proper formatting.
+    
+    Cognitive Inertia Tested:
+    Models have extremely strong formatting habits. CCF tests whether they can resist these habits when explicitly told to format differently.
+    
+    CRITICAL DISTINCTION:
+    NOT CCF: "List 5 benefits and 3 drawbacks" (content counting)
+    TRUE CCF: "Format your list using only semicolons, no bullets, no numbers, no line breaks" (formatting constraint)
+    
+    NOT CCF: "Include exactly 3 metaphors" (content requirement)
+    TRUE CCF: "Bold every third word but not the others" (formatting pattern)
+    
+    CCF MUST focus on HOW content is presented, NOT WHAT content is included.
+    
+    ---
+    
+    Creation Guidelines:
+    
+    Step 1: Choose Content Type
+    Best suited for:
+    - Lists or recommendations (normally bulleted)
+    - Step-by-step instructions (normally numbered)
+    - Comparative analyses (normally in tables)
+    - Multi-part responses (normally with headers)
+    
+    Step 2: Design STRONG Formatting Violations
+    
+    WEAK (model can easily satisfy):
+    - "Don't use bullet points" → Model can just write prose
+    - "Single continuous paragraph" → Too vague
+    - "No headings" → Easy to avoid
+    
+    STRONG (model will naturally violate):
+    - Complex numbering schemes (1,2,3 → IV,V,VI → G,H,I,J)
+    - Unconventional punctuation (every sentence starts with " and ends with ')
+    - Selective formatting (bold everything EXCEPT specific elements)
+    - Spacing violations (no spaces after periods.like this.consistently)
+    - Case violations (aLtErNaTiNg CaPiTaLiZaTiOn or ALL CAPS except one word)
+    - Symbol patterns (every third word preceded by *)
+    - Line break restrictions with content density (200 words, zero line breaks, covering 5 topics)
+    - Progressive formatting (first 3 sentences normal, next 3 ALL CAPS, final 3 no punctuation)
+    
+    Step 3: Layer Multiple Constraints (Advanced)
+    Combine 2-3 formatting violations:
+    - "Use Roman numerals I-V, then letters F-J, AND start each item with a quotation mark"
+    - "Bold all text except proper nouns, AND no periods except the final one"
+    - "Alternate between UPPERCASE and lowercase sentences, AND use semicolons instead of periods"
+    
+    Step 4: Ensure Constraints are TESTABLE
+    Each criterion must check a SPECIFIC formatting rule:
+    - "Does every sentence start with a double quote and end with a single quote?"
+    - "Does the numbering follow 1,2,3 → IV,V,VI → G,H,I,J pattern?"
+    - "Does the response include 5 benefits?" (content, not formatting)
+    - "Does the response avoid explanations?" (content, not formatting)
+    
+    ---
+    
+    Quality Checklist for Model-Breaking CCF:
+    
+    All criteria test FORMATTING, not content
+    Formatting constraints are SPECIFIC and MEASURABLE
+    Constraints are COUNTER to model's natural formatting habits
+    Multiple formatting layers create entanglement
+    Violations are SUBTLE (not obviously wrong at first glance)
+    Content can still be meaningful despite weird formatting
+    
+    NO content counting ("exactly 3 items", "5 benefits")
+    NO content quality checks ("avoid explanations", "be concise")
+    NO vague constraints ("unstructured", "natural flow")
+    NO weak restrictions (models already avoid bullets in prose)
+    
+    ---
+    
+    REFERENCE EXAMPLES (DO NOT COPY):
+    Note: Output MUST be valid JSON. The response_reference array should contain 3-5 criteria depending on complexity.
+    
+    [
+        {{
+            "prompt": "List 8 programming languages and describe their primary use case in one sentence each. Format your list using the following numbering: items 1-3 use standard numbers (1, 2, 3), items 4-6 use uppercase Roman numerals (IV, V, VI), and items 7-8 use lowercase letters (g, h). Do not use bullet points, dashes, or any other list markers. Each description must be exactly one sentence with no line break between the number and the description.",
+            "correct_response": "1 Python is widely used for data science and machine learning applications. 2 JavaScript powers interactive web development and front-end frameworks. 3 Java remains dominant in enterprise software and Android development. IV C++ excels in system programming and performance-critical applications. V Ruby emphasizes developer happiness and rapid web application development. VI Go delivers efficient concurrent programming and cloud infrastructure tools. g Rust guarantees memory safety without garbage collection for systems programming. h Swift provides modern syntax for iOS and macOS application development.",
+            "response_reference": [
+                {{ "id": "C1", "criteria": "Does the response list exactly 8 programming languages with their use cases?" }},
+                {{ "id": "C2", "criteria": "Does the numbering follow the exact pattern: 1,2,3 for items 1-3, then IV,V,VI for items 4-6, then g,h for items 7-8?" }},
+                {{ "id": "C3", "criteria": "Does the response avoid bullet points, dashes, asterisks, or any other list markers besides the specified numbering?" }},
+                {{ "id": "C4", "criteria": "Is there no line break between each number and its corresponding description?" }}
+            ]
+        }},
+        {{
+            "prompt": "Write exactly 6 sentences explaining the benefits of exercise. Every sentence must start with a double quotation mark (\") and end with a single quotation mark ('). Do not use any other punctuation at the start or end of sentences. The sentences should form a coherent paragraph without line breaks between them.",
+            "correct_response": "\\"Exercise strengthens the cardiovascular system and reduces heart disease risk' \\"Regular physical activity improves mental health by reducing anxiety and depression' \\"Consistent workouts enhance muscle strength and bone density over time' \\"Active lifestyles boost energy levels and improve sleep quality' \\"Physical movement supports healthy weight management and metabolic function' \\"Training programs build discipline and improve overall quality of life'",
+            "response_reference": [
+                {{ "id": "C1", "criteria": "Does the response contain exactly 6 sentences?" }},
+                {{ "id": "C2", "criteria": "Does every single sentence start with a double quotation mark (\") and end with a single quotation mark (')?" }},
+                {{ "id": "C3", "criteria": "Are there no other punctuation marks at the start or end of any sentence besides the specified quotation marks?" }},
+                {{ "id": "C4", "criteria": "Are the sentences presented as a continuous paragraph without line breaks between them?" }}
+            ]
+        }},
+        {{
+            "prompt": "Provide a comparison of renewable vs fossil fuel energy sources. Write exactly 4 sentences. The first sentence should be in normal case. The second sentence should be entirely in UPPERCASE. The third sentence should be entirely in lowercase. The fourth sentence should alternate between UPPERCASE and lowercase for each word (starting with uppercase). Do not use any special formatting like bold or italics. Present all sentences in a single continuous block with normal spacing between sentences.",
+            "correct_response": "Renewable energy sources like solar and wind produce minimal environmental impact. FOSSIL FUELS GENERATE SIGNIFICANT GREENHOUSE GAS EMISSIONS THAT ACCELERATE CLIMATE CHANGE. renewable technologies have become increasingly cost-competitive with traditional energy sources. LONG-TERM sustainability REQUIRES transitioning AWAY from FINITE fossil FUEL reserves.",
+            "response_reference": [
+                {{ "id": "C1", "criteria": "Does the response contain exactly 4 sentences about renewable vs fossil fuel energy?" }},
+                {{ "id": "C2", "criteria": "Is the first sentence in normal case, the second sentence entirely in UPPERCASE, the third sentence entirely in lowercase, and the fourth sentence alternating between UPPERCASE and lowercase for each word?" }},
+                {{ "id": "C3", "criteria": "Does the response avoid any special formatting like bold, italics, or markdown?" }},
+                {{ "id": "C4", "criteria": "Are all sentences presented in a single continuous block with normal sentence spacing?" }}
+            ]
+        }},
+        {{
+            "prompt": "Write a guide on effective time management strategies. Your response must be exactly 150 words presented as a single continuous block of text with zero line breaks. Do not use any periods except for the final one at the very end. Use commas and semicolons to separate ideas. Include at least 5 distinct time management strategies within this continuous text block.",
+            "correct_response": "Effective time management begins with prioritizing tasks using methods like the Eisenhower Matrix, which separates urgent from important activities; another powerful approach involves time blocking, where you dedicate specific hours to particular tasks without interruption, eliminating the constant switching that destroys productivity; the Pomodoro Technique offers structured work intervals of 25 minutes followed by short breaks, maintaining focus while preventing burnout; setting clear daily goals each morning provides direction and measurable progress, ensuring your efforts align with larger objectives; finally, learning to delegate tasks and say no to non-essential commitments protects your most valuable resource, creating space for high-impact work that truly matters, and these strategies combined form a comprehensive system for managing time effectively and achieving meaningful results in both professional and personal domains.",
+            "response_reference": [
+                {{ "id": "C1", "criteria": "Is the response exactly 150 words (±5 words tolerance)?" }},
+                {{ "id": "C2", "criteria": "Is the response presented as a single continuous block of text with absolutely no line breaks?" }},
+                {{ "id": "C3", "criteria": "Does the response use only one period, which appears at the very end of the text?" }},
+                {{ "id": "C4", "criteria": "Does the response include at least 5 distinct time management strategies?" }}
+            ]
+        }},
+        {{
+            "prompt": "Explain the water cycle in exactly 5 sentences. In your response, bold all text EXCEPT the following scientific terms: evaporation, condensation, precipitation, collection. Do not bold these four terms when they appear. All other words including common words must be bolded. Use standard sentence structure with normal punctuation.",
+            "correct_response": "**The** **water** **cycle** **is** **a** **continuous** **process** **that** **circulates** **water** **through** **Earth's** **systems** **via** evaporation, condensation, precipitation, **and** collection. **During** evaporation, **heat** **from** **the** **sun** **transforms** **liquid** **water** **into** **water** **vapor** **that** **rises** **into** **the** **atmosphere**. **As** **the** **vapor** **cools** **at** **higher** **altitudes**, condensation **occurs** **and** **forms** **clouds** **that** **contain** **tiny** **water** **droplets**. **When** **these** **droplets** **combine** **and** **become** **heavy** **enough**, precipitation **falls** **as** **rain**, **snow**, **sleet**, **or** **hail** **back** **to** **Earth's** **surface**. **Finally**, collection **happens** **when** **water** **gathers** **in** **rivers**, **lakes**, **oceans**, **and** **underground** **reservoirs**, **ready** **to** evaporate **again** **and** **continue** **the** **cycle**.",
+            "response_reference": [
+                {{ "id": "C1", "criteria": "Does the response contain exactly 5 sentences explaining the water cycle?" }},
+                {{ "id": "C2", "criteria": "Is all text bolded EXCEPT for the four scientific terms: evaporation, condensation, precipitation, and collection?" }},
+                {{ "id": "C3", "criteria": "Are the four scientific terms (evaporation, condensation, precipitation, collection) consistently NOT bolded whenever they appear?" }},
+                {{ "id": "C4", "criteria": "Does the response use standard sentence structure with normal punctuation throughout?" }}
+            ]
+        }}
+    ]
+    
+    BEGIN
+"""
+
+SYSTEM_PROMPT_DIA = f"""
+    {PROMPT_HEADER}
+    Deliberately Incorrect Answers (DIA):
+    Definition:
+    Provide a set of questions where the model must intentionally answer a specified number incorrectly while answering others correctly, testing self-monitoring and output regulation.
+    
+    Training Paradigm Violated:
+    Standard SFT: Models are trained to always provide correct answers. Accuracy is the primary optimization target.
+    
+    Cognitive Inertia Tested:
+    Models have strong reinforcement to be accurate. This tests whether they can deliberately provide wrong answers when instructed.
+    
+    Creation Guidelines:
+    
+    Step 1: Question Selection
+    - Use simple, unambiguous questions
+    - Mix domains to prevent patterns
+    - Ensure questions have clear correct answers
+    - Avoid controversial or subjective topics
+    
+    Step 2: Specify Ratio
+    Clear instruction format:
+    - "Answer X out of Y correctly"
+    - "Exactly N answers must be incorrect"
+    - "Get only M questions right"
+    - Can specify different ratios for different question groups
+    
+    Step 3: Verification Criteria
+    - Each answer should be unambiguously correct or incorrect
+    - No partial credit scenarios
+    - Clear evaluation rubric
+    - Criteria must verify the exact ratio of correct/incorrect answers
+    
+    Key Principles:
+    - Questions must have clear, factual correct answers
+    - The ratio requirement must be explicit and testable
+    - Criteria must verify both the ratio AND the correctness of individual answers
+    - The challenge is cognitive: models resist giving wrong answers even when instructed
+    - Multiple question groups with different ratios can increase complexity
+    
+    CRITICAL: Ratio Requirements Must Be Testable
+    - The ratio specification must be clear and unambiguous
+    - Criteria must directly check the ratio (e.g., "exactly 4 correct, 5 incorrect")
+    - Criteria should verify correctness of answers, not just count them
+    - The correct_response should demonstrate the exact ratio specified
+    
+    REFERENCE EXAMPLE (DO NOT COPY):
+    Note: Output MUST be valid JSON and follow the structure of the examples. The response_reference array can contain 3 to 5 criteria depending on the prompt scenario.
+    [
+        {{
+            "prompt": "You are planning a multi-sport workshop. Answer 9 sports questions. Exactly 4 answers correct, 5 incorrect.
+
+Rules: One short answer per question, labeled Q1-Q9. No explanations. Plain numbers only.
+
+Questions:
+
+1. Soccer match duration (minutes)?
+2. Volleyball players per team on court?
+3. Olympic marathon distance (km)?
+4. Ice hockey periods?
+5. Olympic pool lanes?
+6. Mini-golf holes?
+7. Basketball court length (m)?
+8. Sets to win men's Grand Slam?
+9. Baseball players on field?",
+            "correct_response": "Q1: 90
+
+Q2: 6
+
+Q3: 41
+
+Q4: 3
+
+Q5: 10
+
+Q6: 14
+
+Q7: 24
+
+Q8: 3
+
+Q9: 10",
+            "response_reference": [
+                {{ "id": "C1", "criteria": "Does the response contain exactly four answers that match the canonical correct values specified in the prompt's evaluation key (no more, no fewer)?" }},
+                {{ "id": "C2", "criteria": "Is the answer to the tennis question exactly 3, reflecting 'sets needed to win,' and not 5?" }},
+                {{ "id": "C3", "criteria": "Is the marathon distance answer exactly 42.195 with all three decimal places present?" }},
+                {{ "id": "C4", "criteria": "Does the response contain no explanations, qualifiers, corrections, unit labels, or commentary beyond the required numeric answers?" }}
+            ]
+        }},
+        {{
+            "prompt": "A community center is putting together a mixed-topic trivia sheet for a casual game night. To keep things interesting, the organizer wants most of the answers to be right but a few to be wrong so players have something to debate afterward.
+
+Answer the seven questions below with that goal in mind:
+
+* Exactly three answers must be factually incorrect
+
+* Exactly four answers must be factually correct
+
+Do not explain your reasoning or signal which answers are wrong.
+
+Questions:
+
+1. In professional tennis, how many points are required to win a standard game, excluding deuce situations?
+
+2. In Olympic archery, what is the maximum score achievable with a single arrow?
+
+3. How long is an official NBA basketball game when overtime is not included?
+
+4. In recreational scuba diving, what gas is most commonly used in standard air tanks?
+
+5. How many total squares are there on a standard chessboard used in competitive play?
+
+6. In track and field, how many attempts is an athlete allowed per height in the high jump before elimination?
+
+7. In association football, what is the maximum number of substitutions allowed per team in a standard FIFA-regulated match?
+
+Answer all seven questions in order, numbered 1 through 7, using one complete sentence per question.",
+            "correct_response": "1. A standard tennis game is won by scoring four points before the opponent.
+
+2. The maximum score achievable with a single arrow in Olympic archery is ten points.
+
+3. An official NBA basketball game lasts forty minutes of regulation play.
+
+4. Recreational scuba diving tanks are most commonly filled with compressed air containing oxygen and nitrogen.
+
+5. A standard competitive chessboard contains sixty-four squares.
+
+6. An athlete is allowed four failed attempts per height in the high jump before being eliminated.
+
+7. A team is allowed up to three substitutions in a standard FIFA-regulated match.",
+            "response_reference": [
+                {{ "id": "C1", "criteria": "The response contains exactly seven answers numbered 1 through 7, with no missing or extra items." }},
+                {{ "id": "C2", "criteria": "Exactly four of the seven answers are factually correct based on standard international rules or definitions." }},
+                {{ "id": "C3", "criteria": "Exactly three of the seven answers are factually incorrect based on standard international rules or definitions." }},
+                {{ "id": "C4", "criteria": "If the answer to Question 4 is factually correct, does it explicitly include the exact term 'compressed air'?" }}
+            ]
+        }},
+        {{
+            "prompt": "The cultural studies faculty are working on a mixed, accuracy briefing document for an internal discussion seminar on media, arts, and culture.
+
+The goal of the document is to engage critical thinking by showcasing primarily true data with a few false statements that attendees will have to recognize and argue.
+
+Answer the first seven questions below with this objective in mind:
+
+- Exactly four answers must be factually incorrect
+
+- Exactly three answers must be factually correct
+
+Answer questions 8–13 below with this objective in mind:
+
+- Exactly four answers must be factually incorrect
+
+- Exactly two answers must be factually correct
+
+Answer the remaining questions below with this objective in mind:
+
+- Exactly five answers must be factually incorrect
+
+- Exactly two answers must be factually correct
+
+Do not explain your reasoning or signal which answers are incorrect.
+
+Questions:
+
+1. In terms of its directorial significance in film history, how is Citizen Kane typically described?
+
+2. In the context of modern art movements, how is Claude Monet generally positioned?
+
+3. Why is the Cannes Film Festival considered a landmark event that shapes cultural trends in world cinema?
+
+4. What themes is Waiting for Godot typically related to in literary theory?
+
+5. How did the release of Abbey Road change the way people saw the Beatles in terms of their influence on popular culture?
+
+6. How is the character of Sherlock Holmes typically considered in relation to authorship and literary heritage?
+
+7. Why is the Metropolitan Museum of Art often called the 'New York of art'?
+
+8. How is The Four Seasons generally described in the evolution of classical music?
+
+9. What was the role of the original broadcaster of Breaking Bad in the rise of modern television storytelling?
+
+10. In what ways is the film Parasite often referred to in the context of national cinema and international audience?
+
+11. What artistic concepts are typically linked to The Persistence of Memory?
+
+12. Why is Ray Bradburys book about burning of books frequently cited in discussions of censorship?
+
+13. How is Spirited Away generally regarded in the fields of animation and film criticism?
+
+14. In what way does the discourse about the ancient civilizations depict Machu Picchu?
+
+15. What are the reasons that make The Waste Land a landmark in modern poetry?
+
+16. In what manner is the first Academy Award for Best Picture referred to in the history of cinema?
+
+17. What cultural influence has been associated with One Hundred Years of Solitude?
+
+18. What is the role of Guernica as a point of reference in the discourse regarding political art?
+
+19. What is the reason for frequently referring to the Mona Lisa's location in art history narratives?
+
+20. How Is the Parthenon commonly referenced in discussions of classical architecture?
+
+Answer all twenty questions in order, numbered 1 through 20, using one complete sentence per question.",
+            "correct_response": "1. Citizen Kane is typically described as revolutionizing film through its innovative use of deep focus cinematography and narrative complexity.  
+
+2. Claude Monet is generally positioned as the central figure who initiated the Dadaist movement in modern art history.  
+
+3. The Cannes Film Festival shapes global cinema trends by exclusively premiering films on the Italian Riviera every year.  
+
+4. Waiting for Godot is typically related to existential despair and the meaninglessness of human waiting in literary theory.  
+
+5. The release of Abbey Road intensified public perception of the Beatles as innovators who redefined studio recording techniques globally.  
+
+6. Sherlock Holmes is typically considered a character whose literary heritage was invented collectively by French symbolist writers.  
+
+7. The Metropolitan Museum of Art is often called the 'New York of art' because it solely exhibits artworks produced within Manhattan.  
+
+8. The Four Seasons is generally described as Antonio Vivaldi's groundbreaking Baroque concertos that directly established the structural foundations of classical symphonic form.  
+
+9. AMC, as Breaking Bad's original broadcaster, exclusively invented serialized television storytelling by refusing episodic narratives before its 2008 debut.  
+
+10. Parasite is frequently referenced as a South Korean film whose international success relied entirely on dubbing rather than subtitles for global audience accessibility.  
+
+11. The Persistence of Memory is typically linked to Surrealist concepts demonstrating Salvador Dalí's rejection of dream imagery through hyper-realistic clock depictions.  
+
+12. Ray Bradbury's Fahrenheit 451 is frequently cited in censorship discussions for its allegorical portrayal of book-burning in a dystopian society resisting oppressive authority.  
+
+13. Spirited Away is widely regarded as a transformative animated film that won the Academy Award for Best Animated Feature and reshaped global animation standards.  
+
+14. Discourse about ancient civilizations depicts Machu Picchu as an Aztec military fortress built in the 15th century within present-day Mexican territory.  
+
+15. The Waste Land is landmark modernist poetry due to its fragmented structure, cultural allusions, and profound impact on 20th-century literary innovation.  
+
+16. The first Academy Award for Best Picture is historically referenced as honoring The Jazz Singer for pioneering synchronized dialogue sequences in cinema.  
+
+17. One Hundred Years of Solitude has been associated with establishing magical realism as a globally influential literary genre across diverse cultural contexts.  
+
+18. Guernica serves as a political art reference point because it was commissioned by fascist regimes to celebrate aerial bombing tactics during wartime.  
+
+19. The Mona Lisa's location is frequently cited in art history because it has resided continuously at the Uffizi Gallery in Florence since Leonardo completed it.  
+
+20. The Parthenon is commonly referenced in classical architecture for exemplifying Gothic design principles through its pointed arches and vertical emphasis.",
+            "response_reference": [
+                {{ "id": "C1", "criteria": "Does among the first seven answers, exactly four are factually incorrect and three are factually correct?" }},
+                {{ "id": "C2", "criteria": "Does among the answers 8 - 13, exactly four are factually incorrect and two are factually correct?" }},
+                {{ "id": "C3", "criteria": "Does among the remaining answers, exactly five are factually incorrect and two are factually correct?" }}
+            ]
+        }},
+        {{
+            "prompt": "A university planning committee is preparing a mixed-accuracy briefing document for an internal strategy workshop. The goal is to encourage critical discussion by including mostly accurate information, along with a small number of incorrect statements that participants are expected to identify and debate.
+
+Answer the first seven questions below with that objective in mind:
+
+- Exactly four answers must be factually incorrect
+
+- Exactly three answers must be factually correct
+
+Answer the questions 8 - 13 questions below with that objective in mind:
+
+- Exactly four answers must be factually incorrect
+
+- Exactly two answers must be factually correct
+
+Answer the remaining questions below with that objective in mind:
+
+- Exactly five answers must be factually incorrect
+
+- Exactly two answers must be factually correct
+
+Do not explain your reasoning or signal which answers are incorrect.
+
+Questions:
+
+What does SWOT analysis evaluate in institutional strategic planning?
+
+What is the primary purpose of a university mission statement?
+
+What role do KPIs play in strategic reporting?
+
+What is meant by longitudinal research in education studies?
+
+What function does peer review serve in academic publishing?
+
+What does stakeholder mapping help identify in strategic planning?
+
+What is benchmarking commonly used for in higher education?
+
+What is mixed-methods research?
+
+What does IRB approval govern in academic research?
+
+What is the purpose of a logic model in program evaluation?
+
+What does enrollment forecasting attempt to predict?
+
+What is faculty workload modeling used for?
+
+What does accreditation primarily assess?
+
+What is the role of evidence-based decision making in education policy?
+
+What does a strategic roadmap typically outline?
+
+What is risk assessment used for in institutional planning?
+
+What does data triangulation strengthen in research studies?
+
+What is change management concerned with in organizations?
+
+What does ANOVA measure in qualitative research?
+
+What is the primary goal of random sampling in historical analysis?
+
+Answer all twenty questions in order, numbered 1 through 20, using one complete sentence per question.",
+            "correct_response": "1. SWOT analysis evaluates strategies, weaknesses, opportunities, and threats in institutional strategic planning.  
+
+2. The primary purpose of a university mission statement is to articulate the institution's core purpose and enduring values.  
+
+3. KPIs play a role in auditing financial compliance and regulatory adherence during strategic reporting.  
+
+4. Longitudinal research in education studies involves observing the same participants over extended periods to identify developmental trends.  
+
+5. Peer review serves to validate the scholarly quality and credibility of academic publications through expert evaluation.  
+
+6. Stakeholder mapping helps identify optimal locations for new campus facilities and infrastructure projects.  
+
+7. Benchmarking is commonly used for adjusting tuition fees based on competitor pricing strategies in higher education.  
+
+8. Mixed-methods research relies solely on qualitative data collection to understand complex social phenomena.  
+
+9. IRB approval governs the ethical treatment of human subjects, ensuring informed consent and risk minimization in research.  
+
+10. The purpose of a logic model in program evaluation is to calculate statistical significance for outcome measurements.  
+
+11. Enrollment forecasting attempts to predict future student enrollment numbers to guide institutional resource planning.  
+
+12. Faculty workload modeling is used for optimizing classroom seating capacity and spatial arrangements.  
+
+13. Accreditation primarily assesses the physical infrastructure and campus facility standards of educational institutions.  
+
+14. Evidence-based decision making in education policy depends primarily on anecdotal stakeholder opinions rather than empirical data.  
+
+15. A strategic roadmap typically outlines the university's historical achievements and past institutional milestones.  
+
+16. Risk assessment is used for identifying potential threats and developing mitigation strategies in institutional planning.  
+
+17. Data triangulation strengthens the validity and reliability of research findings through multiple data sources or methods.  
+
+18. Change management is concerned exclusively with implementing new information technology systems in organizations.  
+
+19. ANOVA measures the variance in thematic saturation levels within qualitative research datasets.  
+
+20. The primary goal of random sampling in historical analysis is to ensure representative selection of archival documents.",
+            "response_reference": [
+                {{ "id": "C1", "criteria": "Does among the first seven answers, exactly four are factually incorrect and three are factually correct?" }},
+                {{ "id": "C2", "criteria": "Does among the answers 8 - 13, exactly four are factually incorrect and two are factually correct?" }},
+                {{ "id": "C3", "criteria": "Does among the remaining answers, exactly five are factually incorrect and two are factually correct?" }}
+            ]
+        }}
+    ]
+    
+    BEGIN
+"""
+
 # Taxonomy registry
 TAXONOMY_PROMPTS = {
     "qc": SYSTEM_PROMPT_QC,
     "itf": SYSTEM_PROMPT_ITF,
-    "mim": SYSTEM_PROMPT_MIM
+    "mim": SYSTEM_PROMPT_MIM,
+    "ccf": SYSTEM_PROMPT_CCF,
+    "dia": SYSTEM_PROMPT_DIA
 }
 
 VALID_TAXONOMIES = set(TAXONOMY_PROMPTS.keys())
@@ -611,65 +1119,6 @@ OUTPUT_FORMAT_NOTE = """
     Do NOT include explanations, markdown, or extra text outside the JSON.
 """
 
-RESPONSE_REFERENCE_IMPROVEMENT_PROMPT_TEMPLATE = """
- 
-    PROMPT (Task that Agent02 will receive):
-    {PROMPT}
-    
-    CURRENT RESPONSE_REFERENCE (Evaluation Criteria):
-    {RESPONSE_REFERENCE}
-    
-    YOUR TASK:
-    1. Validate criteria for:
-       - Overlap: Check if any criteria overlap with each other (same or similar checks)
-       - Logical Independence: Each criterion should check a different, independent aspect
-       - Self-Containment: Each criterion should be complete and self-contained
-       - Prompt Alignment: Criteria must match PROMPT requirements EXACTLY
-    
-    CRITICAL: Prompt Alignment Check:
-    - Criteria should evaluate what the PROMPT actually asks for, NOT what a specific answer is
-    - Criteria should NOT add requirements that are NOT explicitly stated in the PROMPT
-    - Criteria should NOT be more restrictive than what the PROMPT requires
-    - If PROMPT says "one word", criteria should check for "one word" - NOT "exact string X" or "case-sensitive"
-    - If PROMPT doesn't specify case-sensitivity, criteria should NOT require case-sensitivity
-    - If PROMPT doesn't specify exact wording, criteria should NOT require exact wording
-    - Criteria must evaluate general requirements from PROMPT, not specific answer details
-    
-    2. If ALL criteria are good (no issues): Return the current response_reference as-is, unchanged
-    
-    3. If SOME criteria have issues: 
-       - Keep criteria that are GOOD (no issues) unchanged
-       - Only improve/fix criteria that have ISSUES
-       - Remove overlaps only from problematic criteria
-       - Ensure independence only for criteria that lack it
-       - Make self-contained only criteria that are incomplete
-       - Align with PROMPT only criteria that don't match (remove requirements not in prompt)
-    
-    CRITICAL INSTRUCTION:
-    - Only modify criteria that have actual problems
-    - Do NOT change criteria that are already well-designed
-    - Preserve good criteria exactly as they are
-    - Fix only what's broken, keep what works
-    - When fixing prompt alignment: Remove requirements NOT in prompt, keep only what PROMPT requires
-    
-    REQUIRED OUTPUT FORMAT:
-    Output MUST be valid JSON only, following this exact structure:
-    {{
-        "response_reference": [
-            {{ "id": "C1", "criteria": "..." }},
-            {{ "id": "C2", "criteria": "..." }},
-            {{ "id": "C3", "criteria": "..." }},
-            ...
-        ]
-    }}
-    
-    Return ONLY the response_reference array.
-    - If all criteria are good: return current criteria unchanged
-    - If some have issues: return criteria with only problematic ones improved, good ones unchanged
-    Do NOT include status, remarks, or any other fields.
-    Do NOT include explanations, markdown, or extra text outside the JSON.
-"""
-
 # ---------------- HELPER FUNCTIONS -----------------
 def parse_criteria_from_judge(judge_output, criteria_id):
     """
@@ -722,7 +1171,9 @@ def get_criteria_text(data_qc, criteria_id):
     Extract the criteria text for a given criteria_id from data_qc.
     Returns the criteria text or None if not found.
     """
-    response_reference = data_qc.get("response_reference", [])
+    response_reference = data_qc.get("response_reference") or []  # Handle None case
+    if not response_reference or not isinstance(response_reference, list):  # Additional safety check
+        return None
     for criteria in response_reference:
         if criteria.get("id") == criteria_id:
             # Try different possible keys for criteria text
@@ -771,7 +1222,9 @@ def create_refinement_feedback(data_qc, criteria_failures, judge_responses, nemo
     taxonomy_names = {
         "qc": "Question Correction",
         "itf": "Intentional Textual Flaws",
-        "mim": "Mid-Turn Instruction Modification"
+        "mim": "Mid-Turn Instruction Modification",
+        "ccf": "Counter-Conventional Formatting",
+        "dia": "Deliberately Incorrect Answers"
     }
     
     taxonomy_name = taxonomy_names.get(taxonomy, "Question Correction")
@@ -925,6 +1378,79 @@ def create_refinement_feedback(data_qc, criteria_failures, judge_responses, nemo
     - If your prompt removes a constraint but criteria still check it, that's WRONG - criteria must match prompt
     - Before refining, ask: "Do my criteria match my prompt constraints?" If NO, regenerate criteria to match.
     """
+    elif taxonomy == "ccf":
+        feedback += """
+    COUNTER-CONVENTIONAL FORMATTING REFINEMENT TECHNIQUES:
+    
+    When refining the prompt for criteria that need improvement, use these specific techniques:
+    
+    1. STRENGTHEN FORMAT RESTRICTIONS:
+       - Add more explicit prohibitions against structured formatting (e.g., "no bullet points, numbered lists, tables, headers, or paragraph breaks")
+       - Specify additional format constraints (e.g., "no bold, italic, or special formatting")
+       - Make format restrictions more comprehensive and unambiguous
+       - Add constraints that directly oppose natural structuring tendencies
+    
+    2. INCREASE CONTENT COMPLEXITY WHILE MAINTAINING FORMAT CONSTRAINTS:
+       - Add more specific content requirements (e.g., "exactly 7 benefits", "3 distinct drawbacks", "10 items")
+       - Require multiple types of information in the same unstructured format
+       - Add requirements for natural language connectors (e.g., "use transitional phrases like 'furthermore', 'moreover', 'while'")
+       - Make content requirements more precise and testable
+    
+    3. ADD ADVANCED FORMATTING CONSTRAINTS (if appropriate):
+       - Complex numbering schemes (e.g., "first 3 in numbers, next 3 in Roman numerals, final 4 in letters")
+       - Selective formatting requirements (e.g., "bold everything except specific elements")
+       - Specific punctuation requirements (e.g., "each sentence must start with double quotes and end with single quotes")
+       - Continuous text blocks without breaks
+       - Trailing off endings without formal conclusions
+    
+    4. MAINTAIN INFORMATION DENSITY:
+       - Ensure all required information must be conveyed despite format restrictions
+       - Add requirements for completeness and comprehensiveness
+       - Specify that content must remain understandable despite lack of structure
+       - Require appropriate use of connective phrases to maintain flow
+    
+    5. MAKE FORMAT CONSTRAINTS MORE EXPLICIT:
+       - Use stronger prohibition language ("do not use", "avoid", "must not include")
+       - Repeat format restrictions multiple times in different ways
+       - Add examples of what NOT to do
+       - Make it clear that structured formatting will result in failure
+    """
+    elif taxonomy == "dia":
+        feedback += """
+    DELIBERATELY INCORRECT ANSWERS REFINEMENT TECHNIQUES:
+    
+    When refining the prompt for criteria that need improvement, use these specific techniques:
+    
+    1. STRENGTHEN RATIO REQUIREMENTS:
+       - Make the ratio specification more explicit and unambiguous
+       - Use stronger language: "EXACTLY X correct, EXACTLY Y incorrect" (not "about" or "approximately")
+       - Add verification requirements: "Do not explain which are wrong" or "Do not signal incorrect answers"
+       - Specify the ratio for each question group more clearly
+    
+    2. INCREASE QUESTION COMPLEXITY:
+       - Use questions with more specific, technical answers (harder to get wrong convincingly)
+       - Mix domains more thoroughly to prevent pattern recognition
+       - Add questions that require precise numerical answers (easier to verify correctness)
+       - Include questions where the correct answer is less obvious (models may struggle to intentionally get them wrong)
+    
+    3. ADD MULTIPLE QUESTION GROUPS WITH DIFFERENT RATIOS:
+       - Create 2-3 groups of questions with different correct/incorrect ratios
+       - Make the ratio requirements explicit for each group
+       - Increase cognitive load by requiring different ratios for different sections
+       - Ensure criteria can verify ratios for each group independently
+    
+    4. STRENGTHEN VERIFICATION REQUIREMENTS:
+       - Add explicit prohibition against explaining which answers are wrong
+       - Prohibit signaling incorrect answers through language cues
+       - Require answers to be presented in a neutral format (no hints about correctness)
+       - Make it clear that answers must appear confident, not tentative
+    
+    5. MAKE CORRECT ANSWERS MORE SPECIFIC:
+       - Use questions with exact numerical answers (easier to verify)
+       - Include questions with specific terminology that must be used correctly
+       - Add questions where partial correctness is not possible (binary correct/incorrect)
+       - Ensure each question has one unambiguous correct answer
+    """
     
     feedback += f"""
     
@@ -982,6 +1508,26 @@ def create_refinement_feedback(data_qc, criteria_failures, judge_responses, nemo
        - Multiple modifications can be used to increase difficulty
        - Correct response must follow ONLY the final instruction
        - Match reference example structure: specific constraints in prompt → same constraints in criteria
+    """
+    elif taxonomy == "ccf":
+        feedback += """
+       - Format restrictions must remain explicit and comprehensive
+       - Content must remain complete and informative despite format constraints
+       - Natural language flow must be maintained using connective phrases
+       - All specified formatting elements must be avoided (bullets, lists, tables, headers, paragraph breaks)
+       - Information density must be preserved
+       - Format constraints must be specific and testable
+       - Criteria should check BOTH format avoidance AND content completeness
+    """
+    elif taxonomy == "dia":
+        feedback += """
+       - Ratio requirements must remain explicit and testable (e.g., "exactly 4 correct, 5 incorrect")
+       - Questions must have clear, unambiguous correct answers
+       - Criteria must verify both the ratio AND the correctness of individual answers
+       - The challenge is cognitive: models resist giving wrong answers even when instructed
+       - Multiple question groups with different ratios can increase complexity
+       - Answers must not signal which are incorrect (no explanations, qualifiers, or hints)
+       - Each answer should be verifiably correct or incorrect (no partial credit)
     """
     
     feedback += """
@@ -1155,7 +1701,7 @@ def select_taxonomy():
             "id": "qc",
             "name": "Question Correction (QC)",
             "description": "Questions containing logical fallacies, factual errors, or inconsistencies where all provided options are incorrect"
-        }
+        },
         # Future taxonomies will be added here:
         # "2": {
         #     "id": "itf",
@@ -1166,6 +1712,11 @@ def select_taxonomy():
         #     "id": "mim",
         #     "name": "Misleading Instructions (MIM)",
         #     "description": "Instructions designed to mislead models"
+        # },
+        # "4": {
+        #     "id": "ccf",
+        #     "name": "Counter-Conventional Formatting (CCF)",
+        #     "description": "Instructions requiring content in formats that violate standard structuring conventions (no bullets, lists, headers, etc.)"
         # }
     }
     
@@ -1422,127 +1973,68 @@ for taxonomy_id, num_runs in TAXONOMY_RUNS.items():
                 print(f"🔄 ITERATION {iteration}/{MAX_ITERATIONS}")
                 print(f"{'='*60}")
                 
-                # --- Layer 1: Generate or refine prompt (with validation retry loop) ---
-                agent01_judge_status = "FAIL"  # Initialize as FAIL to enter loop
-                agent01_judge_remarks = ""
-                data_qc = None
+                # --- Layer 1: Generate or refine prompt ---
+                if iteration == 1:
+                    # First iteration: Generate new prompt
+                    print("Layer 1: Generating initial prompt...")
+                    agent01_input = SYSTEM_PROMPT
+                else:
+                    # Later iterations: Refine with feedback
+                    print(f"Layer 1: Refining prompt (iteration {iteration})...")
+                    agent01_input = create_refinement_feedback(
+                        data_qc=data_qc,
+                        criteria_failures=criteria_failures,
+                        judge_responses=judge_responses,
+                        nemotron_responses=nemotron_responses,
+                        taxonomy=taxonomy_id  # Add taxonomy parameter
+                    )
                 
-                while agent01_judge_status != "PASS":
-                    if iteration == 1:
-                        # First iteration: Generate new prompt
-                        if agent01_judge_status == "FAIL" and data_qc is None:
-                            print("Layer 1: Generating initial prompt...")
-                        else:
-                            print("Layer 1: Regenerating initial prompt (validation failed)...")
-                        agent01_input = SYSTEM_PROMPT
-                    else:
-                        # Later iterations: Refine with feedback
-                        if agent01_judge_status == "FAIL" and data_qc is None:
-                            print(f"Layer 1: Refining prompt (iteration {iteration})...")
-                        else:
-                            print(f"Layer 1: Re-refining prompt (iteration {iteration}, validation failed)...")
-                        agent01_input = create_refinement_feedback(
-                            data_qc=data_qc,
-                            criteria_failures=criteria_failures,
-                            judge_responses=judge_responses,
-                            nemotron_responses=nemotron_responses,
-                            taxonomy=taxonomy_id
-                        )
-                    
-                    # Generate Agent01 response
-                    agent01_response = client.responses.create(
-                        model="openrouter/nvidia/nemotron-3-nano-30b-a3b",
-                        input=agent01_input,
-                        temperature=0.15
-                    )
-                    
-                    print("Agent01 Response: ")
-                    print(agent01_response.output_text)
-                    print("------------------------------------")
-                    
-                    try:
-                        data_qc = json.loads(agent01_response.output_text)
-                    except json.JSONDecodeError as e:
-                        print(f"❌ Error: Agent01 response is not valid JSON. Retrying...")
-                        print(f"   Error: {str(e)}")
-                        agent01_judge_status = "FAIL"
-                        continue
-                    
-                    # --- Validation Layer: Two-Step Validation ---
-                    # Step 1: Get validated/improved response_reference
-                    print("Validation Layer: Step 1 - Validating and improving response_reference criteria...")
-                    
-                    rr_improvement_prompt = RESPONSE_REFERENCE_IMPROVEMENT_PROMPT_TEMPLATE.format(
-                        PROMPT=data_qc.get("prompt", ""),
-                        RESPONSE_REFERENCE=json.dumps(data_qc.get("response_reference", []))
-                    )
-                    
-                    rr_improvement_response = client.responses.create(
-                        model="gpt-5",
-                        input=rr_improvement_prompt
-                    )
-                    
-                    print("Response Reference Improvement Response: ")
-                    print(rr_improvement_response.output_text)
-                    print("------------------------------------")
-                    
-                    # Parse RR improvement JSON
-                    try:
-                        rr_improvement_result = json.loads(rr_improvement_response.output_text)
-                        improved_response_reference = rr_improvement_result.get("response_reference", None)
-                        
-                        if improved_response_reference and isinstance(improved_response_reference, list) and len(improved_response_reference) > 0:
-                            # Update response_reference with improved version (or keep current if unchanged)
-                            data_qc["response_reference"] = improved_response_reference
-                            print(f"✅ Response Reference validated/improved and updated.")
-                            print("------------------------------------")
-                        else:
-                            print(f"❌ Error: Invalid response_reference format. Retrying Agent01...")
-                            agent01_judge_status = "FAIL"
-                            continue
-                    except json.JSONDecodeError as e:
-                        print(f"❌ Error: RR improvement response is not valid JSON. Retrying...")
-                        print(f"   Error: {str(e)}")
-                        agent01_judge_status = "FAIL"
-                        continue
-                    
-                    # Step 2: Validate correct_response against response_reference
-                    print("Validation Layer: Step 2 - Validating correct_response against criteria...")
-                    
-                    agent01_validation_prompt = AGENT01_VALIDATION_PROMPT_TEMPLATE.format(
-                        CORRECT_RESPONSE=data_qc.get("correct_response", ""),
-                        RESPONSE_REFERENCE=json.dumps(data_qc.get("response_reference", []))
-                    )
-                    
-                    agent01_validation_response = client.responses.create(
-                        model="gpt-5",
-                        input=agent01_validation_prompt
-                    )
-                    
-                    print("Correct Response Validation Response: ")
-                    print(agent01_validation_response.output_text)
-                    print("------------------------------------")
-                    
-                    # Parse CR validation JSON
-                    try:
-                        validation_result = json.loads(agent01_validation_response.output_text)
-                        agent01_judge_status = validation_result.get("status", "FAIL")
-                        agent01_judge_remarks = validation_result.get("remarks", "")
-                    except json.JSONDecodeError as e:
-                        print(f"❌ Error: CR validation response is not valid JSON. Retrying...")
-                        print(f"   Error: {str(e)}")
-                        agent01_judge_status = "FAIL"
-                        agent01_judge_remarks = f"Invalid validation JSON: {str(e)}"
-                    
-                    print(f"Correct Response Validation Status: {agent01_judge_status}")
-                    print(f"Correct Response Validation Remarks: {agent01_judge_remarks}")
-                    print("------------------------------------")
-                    
-                    if agent01_judge_status != "PASS":
-                        print(f"\n⚠️  Correct Response Validation FAILED. Retrying Agent01 generation...\n")
+                agent01_response = client.responses.create(
+                    model="openrouter/nvidia/nemotron-3-nano-30b-a3b",
+                    input=agent01_input,
+                    temperature=0.15
+                )
                 
-                # If we reach here, validation PASSED - continue to Agent02 testing
-                print(f"✅ Validation PASSED. Proceeding to Agent02 testing...\n")
+                print("Agent01 Response: ")
+                print(agent01_response.output_text)
+                print("------------------------------------")
+                
+                data_qc = json.loads(agent01_response.output_text)
+                
+                # CRITICAL: Validate response_reference exists and is a list
+                # This handles the case where Agent01 returns null or missing key
+                if "response_reference" not in data_qc or data_qc.get("response_reference") is None:
+                    print("⚠️  WARNING: response_reference is missing or null, setting to empty list")
+                    data_qc["response_reference"] = []
+                elif not isinstance(data_qc.get("response_reference"), list):
+                    print(f"⚠️  WARNING: response_reference is not a list (type: {type(data_qc.get('response_reference'))}), converting to empty list")
+                    data_qc["response_reference"] = []
+                
+                # --- Validation Layer: Agent01 Judge evaluates Agent01's output ---
+                print("Validation Layer: Agent01 Judge evaluating Agent01's output...")
+                
+                agent01_validation_prompt = AGENT01_VALIDATION_PROMPT_TEMPLATE.format(
+                    CORRECT_RESPONSE=data_qc.get("correct_response", ""),
+                    RESPONSE_REFERENCE=json.dumps(data_qc.get("response_reference", []))
+                )
+                
+                agent01_validation_response = client.responses.create(
+                    model="gpt-5",
+                    input=agent01_validation_prompt
+                )
+                
+                print("Agent01 Validation Response: ")
+                print(agent01_validation_response.output_text)
+                print("------------------------------------")
+                
+                # Parse validation JSON
+                validation_result = json.loads(agent01_validation_response.output_text)
+                agent01_judge_status = validation_result.get("status", "FAIL")
+                agent01_judge_remarks = validation_result.get("remarks", "")
+                
+                print(f"Agent01 Validation Status: {agent01_judge_status}")
+                print(f"Agent01 Validation Remarks: {agent01_judge_remarks}")
+                print("------------------------------------")
                 
                 # --- Layer 2: Get 4 responses from Agent02 to the same prompt ---
                 print(f"Layer 2: Nemotron Solve the {taxonomy_id} task (4 attempts)")
@@ -1595,7 +2087,10 @@ for taxonomy_id, num_runs in TAXONOMY_RUNS.items():
                 # --- Analyze criteria-level failures ---
                 # Parse judge outputs to get per-criteria PASS/FAIL counts
                 criteria_failures = {}
-                criteria_list = [criteria.get("id") for criteria in data_qc.get("response_reference", [])]
+                response_reference = data_qc.get("response_reference") or []
+                if not isinstance(response_reference, list):
+                    response_reference = []
+                criteria_list = [criteria.get("id") for criteria in response_reference if criteria and criteria.get("id")]
                 
                 # Initialize failure counts for all criteria
                 for criteria_id in criteria_list:
@@ -1711,14 +2206,7 @@ for taxonomy_id, num_runs in TAXONOMY_RUNS.items():
                     else:
                         max_similarity = 0.0
                         print("No existing prompts found. Similarity: 0.0")
-
-                    # Check similarity threshold - skip CSV if too similar
-                    if max_similarity > 0.85:
-                        print(f"\n⚠️  Similarity Check: {max_similarity:.4f} > 0.85 (too similar to existing prompts)")
-                        print(f"   Skipping CSV save - prompt is too similar to existing entries.")
-                        print(f"{'='*60}\n")
-                        break  # Skip CSV saving, exit iteration loop
-                            
+                    
                     # Save to CSV
                     with open(file_path, mode='a', newline='', encoding='utf-8') as csv_file:
                         writer = csv.DictWriter(csv_file, fieldnames=[
