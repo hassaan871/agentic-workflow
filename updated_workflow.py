@@ -6,6 +6,8 @@ import argparse
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 # Using hardcoded values to allow quick local execution without environment variables
 API_KEY = "sk-NMqHr2L2nqIOyZFgynUR9w"
@@ -716,6 +718,361 @@ def parse_criteria_from_judge(judge_output, criteria_id):
         return "FAIL"
     
     return None
+
+def extract_explanation_from_judge(judge_output):
+    """
+    Extract the explanation section from judge output.
+    
+    Args:
+        judge_output: Full judge response text
+    
+    Returns:
+        String: Explanation text, or empty string if not found
+    """
+    try:
+        if "Explanation:" in judge_output:
+            start_idx = judge_output.find("Explanation:") + len("Explanation:")
+            explanation = judge_output[start_idx:].strip()
+            return explanation
+    except Exception:
+        pass
+    return ""
+
+def evaluate_single_criterion(client, student_answer, criterion, criterion_id):
+    """
+    Evaluate a single criterion against student answer using existing JUDGE_PROMPT_TEMPLATE.
+    
+    Args:
+        client: OpenAI client instance
+        student_answer: Agent02's response text
+        criterion: Dictionary with criterion data {"id": "C1", "criteria": "..."}
+        criterion_id: String ID of the criterion (e.g., "C1")
+    
+    Returns:
+        Dictionary: {"criterion_id": "C1", "status": "PASS"/"FAIL", "explanation": "..."}
+    """
+    # Create a single-criterion array for the existing template
+    single_criterion_array = [criterion]
+    single_criterion_json = json.dumps(single_criterion_array)
+    
+    # Reuse existing JUDGE_PROMPT_TEMPLATE
+    judge_system_prompt = JUDGE_PROMPT_TEMPLATE.format(
+        STUDENT_ANSWER=student_answer,
+        STANDARD_CRITERIA=single_criterion_json
+    )
+    
+    try:
+        # Call judge
+        judge_response = client.responses.create(
+            model="gpt-5",
+            input=judge_system_prompt
+        )
+        
+        # Parse status using existing parse function
+        status = parse_criteria_from_judge(judge_response.output_text, criterion_id)
+        
+        if status is None:
+            # Fallback: try to extract from output
+            if "1 point" in judge_response.output_text:
+                status = "PASS"
+            else:
+                status = "FAIL"
+        
+        # Extract explanation from judge output
+        explanation = extract_explanation_from_judge(judge_response.output_text)
+        
+        return {
+            "criterion_id": criterion_id,
+            "status": status,
+            "explanation": explanation
+        }
+    except Exception as e:
+        print(f"⚠️  Error evaluating {criterion_id}: {e}")
+        return {
+            "criterion_id": criterion_id,
+            "status": "FAIL",
+            "explanation": f"Evaluation error: {str(e)}"
+        }
+
+def evaluate_criteria_parallel(client, student_answer, response_reference):
+    """
+    Evaluate all criteria in parallel for a single student answer.
+    
+    Args:
+        client: OpenAI client instance
+        student_answer: Agent02's response text
+        response_reference: List of criteria [{"id": "C1", "criteria": "..."}, ...]
+    
+    Returns:
+        Tuple: (results_dict, explanations_dict)
+        - results_dict: {"C1": "PASS", "C2": "FAIL", ...}
+        - explanations_dict: {"C1": "explanation...", "C2": "explanation...", ...}
+    """
+    if not response_reference:
+        return {}, {}
+    
+    results = {}
+    explanations = {}
+    num_criteria = len(response_reference)
+    
+    print(f"   Evaluating {num_criteria} criteria in parallel...")
+    start_time = time.time()
+    
+    # Create list of tasks
+    tasks = [
+        (criterion, criterion.get("id"))
+        for criterion in response_reference
+    ]
+    
+    # Execute in parallel using ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=num_criteria) as executor:
+        # Submit all tasks
+        future_to_criterion = {
+            executor.submit(
+                evaluate_single_criterion,
+                client,
+                student_answer,
+                criterion,
+                criterion_id
+            ): criterion_id
+            for criterion, criterion_id in tasks
+        }
+        
+        # Collect results as they complete
+        completed = 0
+        for future in as_completed(future_to_criterion):
+            criterion_id = future_to_criterion[future]
+            completed += 1
+            try:
+                result = future.result()
+                status = result.get("status", "FAIL")
+                explanation = result.get("explanation", "")
+                results[criterion_id] = status
+                explanations[criterion_id] = explanation
+                print(f"   [{completed}/{num_criteria}] {criterion_id}: {status}")
+            except Exception as e:
+                print(f"   ⚠️  Error getting result for {criterion_id}: {e}")
+                results[criterion_id] = "FAIL"
+                explanations[criterion_id] = f"Error: {str(e)}"
+    
+    elapsed_time = time.time() - start_time
+    print(f"   ✓ Parallel evaluation completed in {elapsed_time:.2f} seconds")
+    
+    return results, explanations
+
+def reconstruct_judge_output(criteria_results, explanations):
+    """
+    Reconstruct judge output format for backward compatibility.
+    Must match EXACT format from current judge output.
+    
+    Args:
+        criteria_results: Dictionary {"C1": "PASS", "C2": "FAIL", ...}
+        explanations: Dictionary {"C1": "explanation...", "C2": "explanation...", ...}
+    
+    Returns:
+        String: Formatted judge output matching EXACT current format
+    """
+    # Calculate score
+    total_criteria = len(criteria_results)
+    pass_count = sum(1 for status in criteria_results.values() if status == "PASS")
+    score = 1 if pass_count > total_criteria / 2 else 0
+    
+    # Build comprehensive explanation (matching current judge style)
+    failed_criteria = [cid for cid, status in criteria_results.items() if status == "FAIL"]
+    
+    if failed_criteria:
+        # Combine explanations for failed criteria
+        explanation_parts = []
+        for criterion_id in failed_criteria:
+            expl = explanations.get(criterion_id, "")
+            if expl:
+                # Use explanation from judge if available
+                explanation_parts.append(f"{criterion_id} failed: {expl}")
+            else:
+                explanation_parts.append(f"{criterion_id} failed.")
+        
+        # If some passed, mention it
+        if pass_count > 0:
+            combined_explanation = f"{pass_count} out of {total_criteria} criteria passed. " + ". ".join(explanation_parts) + "."
+        else:
+            combined_explanation = ". ".join(explanation_parts) + "."
+    else:
+        combined_explanation = f"All criteria were satisfied: " + ", ".join([
+            f"the response meets {cid}" for cid in criteria_results.keys()
+        ]) + "."
+    
+    # Create formatted output matching EXACT current format
+    judge_output = f"""Grading Basis:
+    {json.dumps(criteria_results, indent=4)}
+
+Score: {score} point
+Explanation: {combined_explanation}"""
+    
+    return judge_output
+
+def validate_single_criterion_agent01(client, correct_response, criterion, criterion_id):
+    """
+    Validate correct_response against a single criterion using existing AGENT01_VALIDATION_PROMPT_TEMPLATE.
+    
+    Args:
+        client: OpenAI client instance
+        correct_response: Agent01's correct response text
+        criterion: Dictionary with criterion data {"id": "C1", "criteria": "..."}
+        criterion_id: String ID of the criterion (e.g., "C1")
+    
+    Returns:
+        Dictionary: {"criterion_id": "C1", "status": "PASS"/"FAIL", "explanation": "..."}
+    """
+    # Create a single-criterion array for the existing template
+    single_criterion_array = [criterion]
+    single_criterion_json = json.dumps(single_criterion_array)
+    
+    # Reuse existing AGENT01_VALIDATION_PROMPT_TEMPLATE
+    validation_prompt = AGENT01_VALIDATION_PROMPT_TEMPLATE.format(
+        CORRECT_RESPONSE=correct_response,
+        RESPONSE_REFERENCE=single_criterion_json
+    )
+    
+    try:
+        # Call judge
+        validation_response = client.responses.create(
+            model="gpt-5",
+            input=validation_prompt
+        )
+        
+        # Parse JSON response
+        result = json.loads(validation_response.output_text)
+        
+        # Extract status and remarks (template uses "remarks" not "explanation")
+        status = result.get("status", "FAIL")
+        remarks = result.get("remarks", "")
+        
+        # Return with criterion_id added
+        return {
+            "criterion_id": criterion_id,
+            "status": status,
+            "explanation": remarks  # Map "remarks" to "explanation"
+        }
+    except Exception as e:
+        print(f"⚠️  Error validating {criterion_id}: {e}")
+        return {
+            "criterion_id": criterion_id,
+            "status": "FAIL",
+            "explanation": f"Validation error: {str(e)}"
+        }
+
+def validate_criteria_parallel_agent01(client, correct_response, response_reference):
+    """
+    Validate correct_response against all criteria in parallel.
+    
+    Args:
+        client: OpenAI client instance
+        correct_response: Agent01's correct response text
+        response_reference: List of criteria [{"id": "C1", "criteria": "..."}, ...]
+    
+    Returns:
+        Tuple: (results_dict, explanations_dict)
+        - results_dict: {"C1": "PASS", "C2": "FAIL", ...}
+        - explanations_dict: {"C1": "explanation...", "C2": "explanation...", ...}
+    """
+    if not response_reference:
+        return {}, {}
+    
+    results = {}
+    explanations = {}
+    num_criteria = len(response_reference)
+    
+    print(f"   Validating {num_criteria} criteria in parallel...")
+    start_time = time.time()
+    
+    # Create list of tasks
+    tasks = [
+        (criterion, criterion.get("id"))
+        for criterion in response_reference
+    ]
+    
+    # Execute in parallel using ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=num_criteria) as executor:
+        # Submit all tasks
+        future_to_criterion = {
+            executor.submit(
+                validate_single_criterion_agent01,
+                client,
+                correct_response,
+                criterion,
+                criterion_id
+            ): criterion_id
+            for criterion, criterion_id in tasks
+        }
+        
+        # Collect results as they complete
+        completed = 0
+        for future in as_completed(future_to_criterion):
+            criterion_id = future_to_criterion[future]
+            completed += 1
+            try:
+                result = future.result()
+                status = result.get("status", "FAIL")
+                explanation = result.get("explanation", "")
+                results[criterion_id] = status
+                explanations[criterion_id] = explanation
+                print(f"   [{completed}/{num_criteria}] {criterion_id}: {status}")
+            except Exception as e:
+                print(f"   ⚠️  Error getting result for {criterion_id}: {e}")
+                results[criterion_id] = "FAIL"
+                explanations[criterion_id] = f"Error: {str(e)}"
+    
+    elapsed_time = time.time() - start_time
+    print(f"   ✓ Parallel validation completed in {elapsed_time:.2f} seconds")
+    
+    return results, explanations
+
+def aggregate_agent01_validation(criteria_results, explanations):
+    """
+    Aggregate parallel validation results into final status and remarks.
+    
+    Args:
+        criteria_results: Dictionary {"C1": "PASS", "C2": "FAIL", ...}
+        explanations: Dictionary {"C1": "explanation...", "C2": "explanation...", ...}
+    
+    Returns:
+        Dictionary: {"status": "PASS"/"FAIL", "remarks": "Detailed explanation..."}
+    """
+    # Calculate overall status: PASS only if ALL criteria pass
+    total_criteria = len(criteria_results)
+    pass_count = sum(1 for status in criteria_results.values() if status == "PASS")
+    
+    # Overall status: PASS only if all criteria pass
+    overall_status = "PASS" if pass_count == total_criteria else "FAIL"
+    
+    # Build comprehensive remarks
+    if overall_status == "PASS":
+        remarks = f"All {total_criteria} criteria are satisfied. " + ". ".join([
+            f"{cid} passed: {explanations.get(cid, '')}" 
+            for cid in criteria_results.keys()
+        ])
+    else:
+        # Combine explanations for failed criteria
+        failed_criteria = [cid for cid, status in criteria_results.items() if status == "FAIL"]
+        passed_criteria = [cid for cid, status in criteria_results.items() if status == "PASS"]
+        
+        remarks_parts = []
+        if passed_criteria:
+            remarks_parts.append(f"{len(passed_criteria)} out of {total_criteria} criteria passed: {', '.join(passed_criteria)}.")
+        
+        for criterion_id in failed_criteria:
+            expl = explanations.get(criterion_id, "")
+            if expl:
+                remarks_parts.append(f"{criterion_id} failed: {expl}")
+            else:
+                remarks_parts.append(f"{criterion_id} failed.")
+        
+        remarks = " ".join(remarks_parts)
+    
+    return {
+        "status": overall_status,
+        "remarks": remarks
+    }
 
 def get_criteria_text(data_qc, criteria_id):
     """
@@ -1506,33 +1863,35 @@ for taxonomy_id, num_runs in TAXONOMY_RUNS.items():
                         agent01_judge_status = "FAIL"
                         continue
                     
-                    # Step 2: Validate correct_response against response_reference
-                    print("Validation Layer: Step 2 - Validating correct_response against criteria...")
+                    # Step 2: Validate correct_response against response_reference (Parallel)
+                    print("Validation Layer: Step 2 - Validating correct_response against criteria (Parallel)...")
                     
-                    agent01_validation_prompt = AGENT01_VALIDATION_PROMPT_TEMPLATE.format(
-                        CORRECT_RESPONSE=data_qc.get("correct_response", ""),
-                        RESPONSE_REFERENCE=json.dumps(data_qc.get("response_reference", []))
+                    # Validate all criteria in parallel
+                    criteria_results, explanations = validate_criteria_parallel_agent01(
+                        client=client,
+                        correct_response=data_qc.get("correct_response", ""),
+                        response_reference=data_qc.get("response_reference", [])
                     )
                     
-                    agent01_validation_response = client.responses.create(
-                        model="gpt-5",
-                        input=agent01_validation_prompt
-                    )
-                    
+                    # Display parallel validation results
                     print("Correct Response Validation Response: ")
-                    print(agent01_validation_response.output_text)
+                    print("results = {")
+                    for criterion_id, status in criteria_results.items():
+                        print(f'    "{criterion_id}": "{status}",')
+                    print("}")
+                    print()
+                    print("explanations = {")
+                    for criterion_id, explanation in explanations.items():
+                        # Truncate long explanations for readability
+                        expl_display = explanation[:100] + "..." if len(explanation) > 100 else explanation
+                        print(f'    "{criterion_id}": "{expl_display}",')
+                    print("}")
                     print("------------------------------------")
                     
-                    # Parse CR validation JSON
-                    try:
-                        validation_result = json.loads(agent01_validation_response.output_text)
-                        agent01_judge_status = validation_result.get("status", "FAIL")
-                        agent01_judge_remarks = validation_result.get("remarks", "")
-                    except json.JSONDecodeError as e:
-                        print(f"❌ Error: CR validation response is not valid JSON. Retrying...")
-                        print(f"   Error: {str(e)}")
-                        agent01_judge_status = "FAIL"
-                        agent01_judge_remarks = f"Invalid validation JSON: {str(e)}"
+                    # Aggregate results into final status and remarks
+                    validation_result = aggregate_agent01_validation(criteria_results, explanations)
+                    agent01_judge_status = validation_result.get("status", "FAIL")
+                    agent01_judge_remarks = validation_result.get("remarks", "")
                     
                     print(f"Correct Response Validation Status: {agent01_judge_status}")
                     print(f"Correct Response Validation Remarks: {agent01_judge_remarks}")
@@ -1569,28 +1928,32 @@ for taxonomy_id, num_runs in TAXONOMY_RUNS.items():
                     
                     nemotron_responses.append(agent02_response.output_text)
                     
-                    # --- Layer 3: Judge this attempt's response ---
+                    # --- Layer 3: Judge this attempt's response (Parallel Evaluation) ---
                     print(f"Layer 3: Judge Layer (Attempt {attempt + 1})")
-                    judge_system_prompt = JUDGE_PROMPT_TEMPLATE.format(
-                        STUDENT_ANSWER=agent02_response.output_text,
-                        STANDARD_CRITERIA=response_reference_json
+                    
+                    # Evaluate all criteria in parallel (returns results + explanations)
+                    criteria_results, explanations = evaluate_criteria_parallel(
+                        client=client,
+                        student_answer=agent02_response.output_text,
+                        response_reference=response_reference
                     )
                     
-                    judge_response = client.responses.create(
-                        model="gpt-5",
-                        input=judge_system_prompt
-                    )
+                    # Reconstruct judge output format with combined explanations
+                    judge_output_formatted = reconstruct_judge_output(criteria_results, explanations)
                     
                     print(f"\nJudge Layer Output (Attempt {attempt + 1}):") 
-                    print(judge_response.output_text)
+                    print(judge_output_formatted)
                     print("------------------------------")
                     
-                    judge_responses.append(judge_response.output_text)
+                    judge_responses.append(judge_output_formatted)
                     
                     # Check if this attempt passed (1 point) or failed (0 point)
-                    attempt_status = "PASS" if "1 point" in judge_response.output_text else "FAIL"
+                    pass_count = sum(1 for status in criteria_results.values() if status == "PASS")
+                    total_criteria = len(criteria_results)
+                    score = 1 if pass_count > total_criteria / 2 else 0
+                    attempt_status = "PASS" if score == 1 else "FAIL"
                     individual_statuses.append(attempt_status)
-                    print(f"Attempt {attempt + 1} Status: {attempt_status}")
+                    print(f"Attempt {attempt + 1} Status: {attempt_status} ({pass_count}/{total_criteria} criteria passed)")
             
                 # --- Analyze criteria-level failures ---
                 # Parse judge outputs to get per-criteria PASS/FAIL counts
