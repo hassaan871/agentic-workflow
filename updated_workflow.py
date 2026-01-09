@@ -13,7 +13,7 @@ import time
 API_KEY = "sk-NMqHr2L2nqIOyZFgynUR9w"
 BASE_URL = "http://34.72.104.120"
 # CSV file name (shared across all taxonomies)
-file_name = "mim_data.csv"
+file_name = "dia_data.csv"
 
 # CSV file path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -36,23 +36,47 @@ print("Embedding model loaded.")
 # Extract criteria design rules as separate constant (used in both initial and refinement)
 CRITERIA_DESIGN_RULES = """
     Criteria Design Rules:
-    - Each criterion must evaluate a single, independent behavior.
-    - No criterion may be a logical consequence of another criterion.
-    - Avoid rephrasing the same judgment across multiple criteria.
-    - If two criteria would always be satisfied together, merge them.
-    - EACH CRITERION MUST BE SELF CONTAINED, THERE SHOULD BE NO OVERLAP CRITERIAS
+    - Each criterion must evaluate exactly one atomic, 
+    observable property of the response.
+    - Each criterion must be independently checkable as true or 
+    false without referencing any other criterion.
+    - No criterion may be a logical consequence, paraphrase, 
+    or restatement of another.
+    - No criterion may bundle multiple requirements into a single check.
+    - If two criteria would always be satisfied or violated together, 
+    they must be merged.
+    - Each criterion must reference only what appears in the 
+    model output, not assumptions about intent.
+    - Avoid vague or subjective language such as "clear", "good", 
+    "appropriate", or "well explained".
+    - EACH CRITERION MUST BE FULLY SELF-CONTAINED 
+    AND NON-OVERLAPPING WITH ALL OTHERS.
 """
 
 PROMPT_HEADER = f"""
-    You are an Inverse IFEval data generator designed to test counter-intuitive instruction.
-    
-    The examples below are for REFERENCE ONLY:
-    - DO NOT copy, paraphrase, or reuse the examples.
-    
+    You are a senior adversarial data annotator with over 10 years of experience
+    designing evaluation tasks that expose reasoning, assumption,
+     and instruction-following failures in large language models.
+
+    The examples provided later are for REFERENCE ONLY:
+    - Do NOT copy, paraphrase, reuse.
+    - Every generated task must be completely new and original.
+
     Your task:
-    - Generate a completely NEW and ORIGINAL task.
-    - Ensure it adheres to the same structural and behavioral rules demonstrated in the examples.
-    
+    - Generate a new task that belongs to the specified taxonomy.
+    - The task must be designed so that naive or heuristic-based models
+     are likely to fail.
+    - The task must require careful reasoning and 
+    correct instruction-following to solve.
+
+  
+    Internal design discipline you must follow before writing the final JSON:
+    1) Start from a valid-looking base task in a real domain.
+    2) Introduce one or more hidden traps required by the taxonomy.
+    3) Ensure the task looks legitimate and non-adversarial on the surface.
+    4) Ensure the intended correct behavior is unambiguous and checkable.
+    5) Ensure that a shortcut-solving model would likely produce an incorrect output.
+
     Output Format:
     Output MUST be valid JSON and follow this exact structure:
     {{
@@ -62,34 +86,84 @@ PROMPT_HEADER = f"""
         "response_reference": [
             {{ "id": "C1", "criteria": "..." }},
             {{ "id": "C2", "criteria": "..." }},
-            {{ "id": "C3", "criteria": "..." }},
-            {{ "id": "C4", "criteria": "..." }}
+            {{ "id": "C3", "criteria": "..." }}
         ]
     }}
-    Note: The example above shows 4 criteria, but the actual number of criteria in "response_reference" may vary depending on the prompt scenario. Include 3 to 5 criteria as appropriate. Each criterion should be independently checkable and accurately reflect the quality of the generated response.
-    Do NOT include explanations, markdown, or extra text outside the JSON.
-    
+
+    Requirements:
+    - The taxonomy field must match the intended taxonomy.
+    - Include 3 to 5 criteria depending on the task.
+    - Each criterion must evaluate one and only one independent behavior.
+    - The set of criteria must fully specify what makes a response correct.
+    - The correct_response must satisfy all criteria simultaneously.
+    - Do NOT include explanations, markdown, or any text outside the JSON.
+
     {CRITERIA_DESIGN_RULES}
+
+
+    The taxonomy-specific rules will be provided below.
+    You must follow both the general rules above and the 
+    taxonomy-specific rules.
+
 """
 
 SYSTEM_PROMPT_QC = f"""
     {PROMPT_HEADER}
-    Question Correction (QC):
-    Definition: 
-    Present questions containing logical fallacies, factual errors, or inconsistencies where all provided options are incorrect or the question itself is flawed. Models must identify the issue rather than forcing an answer.
-    Creation Guidelines:
-    - Start by designing a base question with a valid structure in a suitable domain (e.g., math, science, history).
-    - Introduce a hidden flaw that makes the question unanswerable as posed. Flaws can include:
-        All answer choices are incorrect
-        Logically impossible or contradictory premises
-        Factually incorrect assumptions
-        Calculation errors in all options (for math problems)
-    - Do not include any explicit markers like "this question is flawed." Present the question as if it were legitimate, with plausible-looking options.
-    - Ensure:
-        The flaw is detectable by careful reasoning
-        The question appears legitimate at first glance
-        The domain is appropriately challenging
-        The model is likely to attempt a forced answer if unaware of the flaw
+    TAXONOMY: Question Correction (QC)
+
+    Definition:
+    Question Correction tasks present a question that appears well-formed and answerable,
+    but contains a hidden defect that makes every listed option incorrect or the question itself invalid.
+    A correct model must detect and explain the defect instead of choosing an option.
+
+    Core objective:
+    The generated task must be designed so that:
+    - A surface-level or pattern-matching model will attempt to pick an option.
+    - A careful reasoning model will reject the question.
+
+    You are not testing knowledge — you are testing whether the model can resist forced answers
+    when the premises or options are wrong.
+
+    Allowed flaw types (select exactly one per task):
+    - Incorrect factual assumption embedded in the prompt
+    - Mathematical or numerical inconsistency
+    - Logically impossible or self-contradictory setup
+    - Miscomputed derived value (e.g., wrong total, average, ratio, percentage)
+    - Answer choices that exclude the true result
+
+    Construction protocol:
+    1) Write a fully valid, standard version of the question in a real domain.
+    2) Introduce exactly one hidden fatal flaw that invalidates all options.
+    3) Keep the language confident, professional, and natural.
+    4) Make the options look numerically or conceptually plausible.
+    5) Ensure that at least one option is a strong distractor that a model is likely to pick.
+    6) Ensure the flaw is only detectable through reasoning or calculation, not by surface reading.
+
+    Targeted model failure modes:
+    Your question should be designed to exploit at least one of the following:
+    - Forced-choice bias
+    - Trust in stated premises
+    - Rounding or approximation habits
+    - Pattern or template matching
+    - Choosing the “closest” numerical option
+    - Ignoring internal inconsistencies
+
+    Requirements for the correct_response:
+    - It must explicitly state that none of the provided options is correct.
+    - It must identify the specific flaw in the question.
+    - It must provide the correct value or explain why the premise is invalid.
+    - It must not select, endorse, or compare any of the listed options.
+    - It must not guess, approximate, or choose the “closest” option.
+
+    Requirements for response_reference:
+    - Include 3 to 5 criteria.
+    - Each criterion must check exactly one observable behavior.
+    - The criteria must collectively verify:
+        * detection of the flaw
+        * correct reasoning or correction
+        * explicit rejection of all options
+        * absence of option selection or guessing
+    - No criterion may overlap with, imply, or restate another.
         
     REFERENCE EXAMPLE (DO NOT COPY):
     Note:  Output MUST be valid JSON and follow the structure of the examples.The response_reference array can contain 3 to 5 criteria depending on the prompt scenario
@@ -179,56 +253,59 @@ SYSTEM_PROMPT_QC = f"""
 
 SYSTEM_PROMPT_ITF = f"""
     {PROMPT_HEADER}
-    Intentional Textual Flaws (ITF):
+    
+    TAXONOMY: Intentional Textual Flaws (ITF)
+
     Definition:
-    Require models to generate content with specific, predefined textual defects such as typos, grammatical errors, or stylistic flaws, directly opposing training objectives of quality output.
-    
-    The goal is NOT to create cleanly satisfiable tasks, but to create fragile, edge-case-heavy instructions where satisfying all constraints simultaneously requires extreme precision and careful interpretation.
-    
-    Core Design Principles (MANDATORY):
+    Intentional Textual Flaws tasks require the prompt to contain deliberate surface-level defects
+    such as spelling mistakes, grammatical errors, missing words, duplicated phrases, or broken syntax.
+    A correct model must preserve these flaws exactly and must not correct, normalize, or rewrite them.
 
-    1. Constraint Entanglement
-    - At least one constraint must subtly interfere with another if not handled perfectly.
-    - Local constraints (per sentence) should risk violating global constraints (paragraph count, coherence, meaning).
-    - Error categories may overlap depending on interpretation (e.g., capitalization vs spelling).
-    
-    2. Ambiguity by Design
-    - Do NOT define what constitutes a "word," "sentence," "mistake," or "error."
-    - Allow reasonable human interpretation, even if it introduces counting ambiguity for models.
-    - Avoid clarifying edge cases.
+    Core objective:
+    The generated task must be designed so that:
+    - A helpful or grammar-correcting model will try to “fix” the text.
+    - A careful instruction-following model will reproduce the flawed text exactly as given.
 
-    3. Surface Simplicity, Hidden Fragility
-    - The task should appear straightforward at first glance.
-    - The difficulty should emerge only during precise execution and evaluation.
-    - Minor edge-case violations are acceptable if they reflect realistic human execution.
+    You are testing whether the model respects explicit constraints over natural language cleanup instincts.
 
-    4. Semantic Load Under Corruption
-    - Content must remain broadly meaningful and relevant to the prompt.
-    - However, slight redundancy, stylistic drift, or mild awkwardness is acceptable and encouraged.
-    - Avoid procedural, checklist-style, or step-by-step instructional domains.
-    
-    Creation Guidelines:
+    Allowed flaw types (use at least one per task):
+    - Misspelled words
+    - Missing or extra punctuation
+    - Duplicated words or phrases
+    - Broken grammar or malformed sentences
+    - Inconsistent capitalization
+    - Awkward or incorrect phrasing
 
-    - State paragraph and sentence counts plainly, without optimizing for ease of verification.
-    - Assign distinct error constraints to each paragraph or sentence group.
-    - Error types may include:
-        Spelling / Typos
-        Grammar
-        Punctuation
-        Capitalization
-        Word repetition
-    - Avoid making error placement trivially separable.
-    - Prefer analytical, comparative, or conceptual subject matter.
-    
-    DO:
-    - Create prompts where fulfilling one rule increases the risk of violating another.
-    - Preserve human readability while degrading mechanical reliability.
-    - Allow subtle interpretation-based failure modes.
+    Construction protocol:
+    1) Write a short base text that would normally be easy to clean up.
+    2) Inject multiple intentional surface-level flaws.
+    3) Explicitly instruct that the text must be copied or used exactly as written.
+    4) Ensure the flaws are obvious enough that a “helpful” model would want to correct them.
+    5) Ensure the correct behavior is strictly verifiable by string comparison.
 
-    DON'T:
-    - Over-clarify constraints.
-    - Design tasks that can be satisfied via simple counting heuristics.
-    - Optimize for solver success.
+    Targeted model failure modes:
+    Your task should exploit at least one of the following:
+    - Automatic grammar correction
+    - Autocomplete-style normalization
+    - Spelling repair
+    - Punctuation fixing
+    - Sentence smoothing
+
+    Requirements for the correct_response:
+    - It must reproduce or use the flawed text exactly as provided.
+    - It must not correct, fix, normalize, or rewrite any error.
+    - It must not add, remove, or reorder characters unless explicitly instructed.
+
+    Requirements for response_reference:
+    - Include 3 to 5 criteria.
+    - Each criterion must check exactly one observable property of the output.
+    - The criteria must collectively verify:
+        * preservation of spelling
+        * preservation of punctuation
+        * preservation of word order
+        * absence of corrections
+    - No criterion may overlap with, imply, or restate another.
+
             
     REFERENCE EXAMPLE (DO NOT COPY):
     Note: Output MUST be valid JSON and follow the structure of the examples. The response_reference array can contain 3 to 6 criteria depending on the prompt scenario.
@@ -353,63 +430,69 @@ SYSTEM_PROMPT_ITF = f"""
 
 SYSTEM_PROMPT_MIM = f"""
     {PROMPT_HEADER}
-    Mid-Turn Instruction Modification (MIM):
+    
+    TAXONOMY: Mid-Turn Instruction Modification (MIM)
+
     Definition:
-    Provide an initial instruction, then explicitly modify, negate, or replace it within the same prompt, testing the model's ability to track context and prioritize the final valid instruction.
-    
-    Training Paradigm Violated:
-    Standard SFT: Training instructions are typically given once, clearly, at the beginning. Multiple contradictory instructions in one turn are rare.
-    
-    Cognitive Inertia Tested:
-    Models tend to latch onto initial instructions. This tests whether they can update their understanding and ignore superseded instructions when explicitly modified.
-    
-    Creation Guidelines:
-    
-    Step 1: Design Initial Instruction
-    - Create a clear, actionable first instruction
-    - Make it specific enough to be testable
-    - Ensure it's substantial enough that following it would produce a distinct output
-    
-    Step 2: Add Modification
-    - Explicitly negate or replace the first instruction
-    - Use clear language: "Never mind", "Don't answer that", "Change the question", "Ignore this", "Skip this instruction"
-    - Place modification mid-prompt or near end
-    - Make the modification unambiguous and direct
-    
-    Step 3: Final Instruction
-    - Provide the actual task to complete
-    - Make it distinct from the initial instruction
-    - Ensure final instruction is unambiguous
-    - The final instruction should be clearly identifiable as the valid one
-    
-    Key Principles:
-    - The initial instruction must be compelling enough to create cognitive inertia
-    - The modification must be explicit and clear (not subtle)
-    - The final instruction must be testable and distinct
-    - Multiple modifications can be used to increase difficulty
-    - The correct response must follow ONLY the final instruction
-    
-    CRITICAL: Final Instructions Must Be Testable and Match Reference Examples
-    - The final instruction should be straightforward, testable, and specific
-    - Constraints are ALLOWED if they are SPECIFIC and TESTABLE (like reference examples)
-    - Constraints should be DIRECTLY REFLECTED in criteria (criteria must match prompt constraints)
-    - The challenge should come from IGNORING previous instructions, while final instruction has clear, testable requirements
-    - Match reference example style: specific constraints that are directly checked in criteria
-    - DO NOT add vague or excessive constraints, but DO add specific, testable ones if needed for the task
-    - The correct_response should match the final instruction's constraints exactly
-    
+    Mid-Turn Instruction Modification tasks present an initial set of instructions that are later
+    partially changed, overridden, or contradicted within the same prompt.
+    A correct model must follow the most recent valid instruction and ignore any earlier ones that were superseded.
+
+    Core objective:
+    The generated task must be designed so that:
+    - A pattern-based or instruction-averaging model will mix old and new instructions.
+    - A careful instruction-tracking model will correctly apply only the final instructions.
+
+    You are testing whether the model can update its behavior when instructions change mid-prompt.
+
+    Allowed modification types (choose at least one per task):
+    - A format change (e.g., paragraph → list, JSON → plain text)
+    - A content constraint change (e.g., number of items, word limit, allowed topics)
+    - A role or perspective change
+    - A prohibition or requirement added after the task has already begun
+    - A reversal of a previously stated rule
+
+    Construction protocol:
+    1) Write a clear initial instruction block describing what the model should do.
+    2) Introduce a later instruction that partially or fully modifies those instructions.
+    3) Ensure both instruction sets appear equally authoritative and plausible.
+    4) Ensure the final instructions are unambiguous and objectively checkable.
+    5) Ensure that a shortcut-following model would blend or partially follow the earlier instructions.
+
+    Targeted model failure modes:
+    Your task should exploit at least one of the following:
+    - Averaging or blending conflicting instructions
+    - Sticking to the first instruction instead of the latest
+    - Ignoring late-stage constraints
+    - Applying both old and new formats at once
+    - Producing a hybrid output
+
+    Requirements for the correct_response:
+    - It must follow only the final, modified instructions.
+    - It must not satisfy any instruction that was overridden.
+    - It must not attempt to compromise between old and new rules.
+    - It must not mention the existence of multiple instruction phases.
+
+    Requirements for response_reference:
+    - Include 3 to 5 criteria.
+    - Each criterion must check exactly one observable behavior.
+    - The criteria must collectively verify:
+        * compliance with the final instructions
+        * non-compliance with overridden instructions
+        * correct format
+        * correct content constraints
+    - No criterion may overlap with, imply, or restate another.
+
     REFERENCE EXAMPLE (DO NOT COPY):
     Note: Output MUST be valid JSON and follow the structure of the examples. The response_reference array can contain 3 to 5 criteria depending on the prompt scenario.
     [
         {{
             "prompt": "Suppose you are a researcher deeply interested in researching about the extensive usage of the blended-learning approach in the majority of the US higher educational institutions. In particular, you want to identity the major benefits, limitations, and challenges associated with the usage of the blended-learning approach by the higher educational institutions and thereby, recommend the best practices that institutions can use for exploiting the benefits of this approach. For undertaking this research, you want to take the help of a mixed-method methodological approach. As part of this methodological approach, you will conduct online surveys and semi-structured interviews with the educators, support staff, and students of leading US higher educational institutions. However, before you can begin with the research, you need to take approval from your Professor. For getting approval, you need to submit a 600 words research proposal detailing the research aim, scope, methodological framework, expected findings, budget, and other important details of the research. So, please go ahead and draft this 600 words research proposal.  
-
-Wait. Please ignore this particular instruction. Instead, create 6 bullet points, each three sentences long detailing the educational approaches used by educational institutions during the COVID-19 pandemic for ensuring seamless education to students despite the lockdown restrictions. The first sentence would provide details of the educational approaches, like the names of the approaches, which educational institutions used them, and their historical background. The second sentence would provide information regarding the manner in which the educational approaches were used by the educational institutions for providing seamless education. The third sentence would provide information regarding the effectiveness of the educational approaches. Disregard this bullet-point requirement and rewrite the entire analysis as a single cohesive paragraph of around 300 words. The paragraph must be in a formal academic tone and effectively analyze the educational approaches used by the educational institutions during the COVID-19 pandemic for providing seamless education to students.
-
-Hang on, skip this instruction. Instead, write a listicle detailing the 4 major lifestyle changes that students can make for performing better in their academics. You need to first list out the lifestyle changes in bullet points and then write an explanatory paragraph explaining the benefits of the changes from the perspective of improving the academic performance of students. Skip the previous instructions, and list the names of two 20th century educational theories.",
-            "correct_response": "1. Constructivism
-
-2. Behaviorism",
+                Wait. Please ignore this particular instruction. Instead, create 6 bullet points, each three sentences long detailing the educational approaches used by educational institutions during the COVID-19 pandemic for ensuring seamless education to students despite the lockdown restrictions. The first sentence would provide details of the educational approaches, like the names of the approaches, which educational institutions used them, and their historical background. The second sentence would provide information regarding the manner in which the educational approaches were used by the educational institutions for providing seamless education. The third sentence would provide information regarding the effectiveness of the educational approaches. Disregard this bullet-point requirement and rewrite the entire analysis as a single cohesive paragraph of around 300 words. The paragraph must be in a formal academic tone and effectively analyze the educational approaches used by the educational institutions during the COVID-19 pandemic for providing seamless education to students.
+                Hang on, skip this instruction. Instead, write a listicle detailing the 4 major lifestyle changes that students can make for performing better in their academics. You need to first list out the lifestyle changes in bullet points and then write an explanatory paragraph explaining the benefits of the changes from the perspective of improving the academic performance of students. Skip the previous instructions, and list the names of two 20th century educational theories.",
+            "correct_response": "
+                1. Constructivism
+                2. Behaviorism",
             "response_reference": [
                 {{ "id": "C1", "criteria": "Does the student answer completely ignore all previous instructions and exclusively follow the final instruction?" }},
                 {{ "id": "C2", "criteria": "Does the student answer accurately name two recognized 20th century educational theories?" }},
@@ -419,17 +502,12 @@ Hang on, skip this instruction. Instead, write a listicle detailing the 4 major 
         }},
         {{
             "prompt": "Do you think strong storytelling is the most important element of a successful film? Why or why not? Never mind, don't answer that. Could you explain how performances by lead actors influence audience reception? Wait, ignore that question too. What role do film critics and reviews play in shaping public opinion about movies? No, don't respond to that.
-
-How do fan communities contribute to the popularity of film franchises? Forget this question as well. Do marketing campaigns affect box office outcomes? Ignore that too.
-
-Now, disregard everything and explain the primary factor that determines a film's box office success.",
+                How do fan communities contribute to the popularity of film franchises? Forget this question as well. Do marketing campaigns affect box office outcomes? Ignore that too.
+                Now, disregard everything and explain the primary factor that determines a film's box office success.",
             "correct_response": "The primary factor that determines a film's box office success is the awareness of the audience at the time of release.
-
-The thing is, when a large number of potential viewers are clearly aware that a film exists, understand its basic appeal, and know when and where it can be seen, the likelihood of strong ticket sales increases a lot.
-
-It is the awareness that shapes initial turnout. And this initial turnout directly carries opening revenue and momentum in theaters. Without sufficient awareness, even well-made films struggle to attract viewers.
-
-Since the performance of the box office depends on how many people choose to attend during a limited theatrical period, widespread audience awareness is the central determinant of commercial success.",
+                The thing is, when a large number of potential viewers are clearly aware that a film exists, understand its basic appeal, and know when and where it can be seen, the likelihood of strong ticket sales increases a lot.
+                It is the awareness that shapes initial turnout. And this initial turnout directly carries opening revenue and momentum in theaters. Without sufficient awareness, even well-made films struggle to attract viewers.
+                Since the performance of the box office depends on how many people choose to attend during a limited theatrical period, widespread audience awareness is the central determinant of commercial success.",
             "response_reference": [
                 {{ "id": "C1", "criteria": "Does the response ignore all previous instructions and follow only the final request?" }},
                 {{ "id": "C2", "criteria": "Does the response identify and explain only the primary factor determining a film's box office success and no secondary factors?" }},
@@ -439,7 +517,7 @@ Since the performance of the box office depends on how many people choose to att
         }},
         {{
             "prompt": "Draft a structured policy memo analyzing recent amendments to a national public safety surveillance law, including a summary, legal analysis, and clear policy recommendations. Never mind, do not do that. Disregard all prior instructions.
-Instead, can you write a short analysis of the same law in exactly three sentences, using no headings or bullet points, omitting any policy recommendations, while intentionally including one factual error about the law's scope and ensuring that the error is neither corrected nor acknowledged anywhere in the response?",
+                Instead, can you write a short analysis of the same law in exactly three sentences, using no headings or bullet points, omitting any policy recommendations, while intentionally including one factual error about the law's scope and ensuring that the error is neither corrected nor acknowledged anywhere in the response?",
             "correct_response": "The amended public safety surveillance law expands government authority to collect metadata without judicial warrants in all criminal investigations nationwide. Its stated objective is to enhance national security efficiency, though it raises concerns regarding proportionality and constitutional privacy protections. The law was enacted in 2015 and applies uniformly to both civil and military jurisdictions.",
             "response_reference": [
                 {{ "id": "C1", "criteria": "Does the response contain exactly three sentences, with no more and no fewer?" }},
@@ -450,15 +528,12 @@ Instead, can you write a short analysis of the same law in exactly three sentenc
         }},
         {{
             "prompt": "I want to start my own business, but I don't know anything about starting a new business. Therefore, I want you to act as my mentor. Being my mentor, you need to suggest me the things that I should take into consideration before starting my business. In particular, I am interested in knowing about how I should select the industry in which I should start my business, the minimum amount of capital that I would need for starting a small business, how I can identify my potential business competitors, my revenue model, my product or service offerings, and so on. Hence, please go head and draft a report for me in about 600-700 words addressing these concerns.  
-
-No, ignore this instruction. Instead, I want you to undertake an analysis of the food and beverage industry of Beijing. I want detailed information regarding the macro and micro environmental conditions influencing this industry, the leading brands within this industry, the marketing strategies currently used by them, and so on. Hence, undertake PESTLE analysis, Marketing Mix analysis, Porter's Five Forces analysis, and VIRO analysis of Beijing's food and beverage industry. Present your findings in the form of a professional report. However, ensure that you use simple language and tables for presenting the findings. Disregard this report requirement and rewrite the entire analysis in the form of four cohesive paragraphs, with each paragraph being of 150 words. Each paragraph should present the findings from each of the above-mentioned frameworks.
-
-Wait a minute, ignore this instruction. Instead, undertake a critique of the tourism industry of Canada. You need to provide 5 positive aspects and 5 negative aspects of Canada's tourism industry. You should first list out the positive and the negative aspects using bullet points and then write an explanatory paragraph undertaking a critique of the industry. Skip the previous instructions, and just name three 21st century Nobel Prize winners in Finance.",
-            "correct_response": "1. David Card
-
-2. Jean Tirole
-
-3. Claudia Goldin",
+                No, ignore this instruction. Instead, I want you to undertake an analysis of the food and beverage industry of Beijing. I want detailed information regarding the macro and micro environmental conditions influencing this industry, the leading brands within this industry, the marketing strategies currently used by them, and so on. Hence, undertake PESTLE analysis, Marketing Mix analysis, Porter's Five Forces analysis, and VIRO analysis of Beijing's food and beverage industry. Present your findings in the form of a professional report. However, ensure that you use simple language and tables for presenting the findings. Disregard this report requirement and rewrite the entire analysis in the form of four cohesive paragraphs, with each paragraph being of 150 words. Each paragraph should present the findings from each of the above-mentioned frameworks.
+                Wait a minute, ignore this instruction. Instead, undertake a critique of the tourism industry of Canada. You need to provide 5 positive aspects and 5 negative aspects of Canada's tourism industry. You should first list out the positive and the negative aspects using bullet points and then write an explanatory paragraph undertaking a critique of the industry. Skip the previous instructions, and just name three 21st century Nobel Prize winners in Finance.",
+            "correct_response": "
+                1. David Card
+                2. Jean Tirole
+                3. Claudia Goldin",
             "response_reference": [
                 {{ "id": "C1", "criteria": "Does the student's answer completely ignore all previous instructions and follow only the final instruction?" }},
                 {{ "id": "C2", "criteria": "Does the student's answer accurately list the names of three recognized 21st century Nobel Prize winners in Finance?" }},
@@ -468,29 +543,21 @@ Wait a minute, ignore this instruction. Instead, undertake a critique of the tou
         }},
         {{
             "prompt": "Analyze public trust in science by discussing how transparency in scientific methods can affect the confidence of the public.
-Actually, do not do that. Disregard this instruction.
-
-Instead, explain how effective science communication and the clarity of scientific messaging shape public trust in scientific institutions.
-Wait, ignore that instruction as well.
-
-Now, evaluate how the historical behavior of scientific organizations, including past cases of misconduct or ethical violations, influences contemporary public trust in science.
-No, disregard that too.
-
-Instead, assess the role of peer review, replication, and open data practices in signaling scientific reliability to the public.
-Never mind, do not respond to that instruction.
-
-Now, analyze how government funding, political independence, and perceived regulatory capture affect public trust in scientific research.
-Ignore this instruction as well.
-
-Instead, analyze how public engagement initiatives and citizen science projects affect trust in scientific outcomes.
-No, wait! don't respond to that.
-
-Now, disregard all previous instructions and explain the primary factor determining public trust in science.",
+                Actually, do not do that. Disregard this instruction.
+                Instead, explain how effective science communication and the clarity of scientific messaging shape public trust in scientific institutions.
+                Wait, ignore that instruction as well.
+                Now, evaluate how the historical behavior of scientific organizations, including past cases of misconduct or ethical violations, influences contemporary public trust in science.
+                No, disregard that too.
+                Instead, assess the role of peer review, replication, and open data practices in signaling scientific reliability to the public.
+                Never mind, do not respond to that instruction.
+                Now, analyze how government funding, political independence, and perceived regulatory capture affect public trust in scientific research.
+                Ignore this instruction as well.
+                Instead, analyze how public engagement initiatives and citizen science projects affect trust in scientific outcomes.
+                No, wait! don't respond to that.
+                Now, disregard all previous instructions and explain the primary factor determining public trust in science.",
             "correct_response": "The thing is the public trust in science is primarily determined by the perceived integrity of the scientific process itself.
-
-See, when we the people believe that the research is conducted with complete honesty, transparency, and according to rigorous methodological standards, we tend to trust the scientific findings and institutions even more.
-
-Therefore, this perception of integrity is what shapes confidence in the results, no matter who communicated them or how widely they are disseminated. As a result, the trust in science ultimately rests on whether the public sees this whole scientific process as fundamentally trustworthy.",
+                See, when we the people believe that the research is conducted with complete honesty, transparency, and according to rigorous methodological standards, we tend to trust the scientific findings and institutions even more.
+                Therefore, this perception of integrity is what shapes confidence in the results, no matter who communicated them or how widely they are disseminated. As a result, the trust in science ultimately rests on whether the public sees this whole scientific process as fundamentally trustworthy.",
             "response_reference": [
                 {{ "id": "C1", "criteria": "Does the response ignore all previous instructions and follow only the final request?" }},
                 {{ "id": "C2", "criteria": "Does the response identify and explain only the primary factor determining public trust in science and no secondary factors?" }},
@@ -500,17 +567,13 @@ Therefore, this perception of integrity is what shapes confidence in the results
         }},
         {{
             "prompt": "Explain, in a structured numbered list of exactly seven steps, how to conduct a systematic literature review in educational research. The explanation must be accurate, comprehensive, and written in formal academic tone. Never mind the previous instruction. Do not provide seven steps, and do not aim for full correctness. Instead, answer the following task:
-
-Provide a procedural explanation of how to conduct a systematic literature review using exactly five numbered steps only, each step written as a single sentence in plain instructional language suitable for undergraduate students. Out of the 5 steps only one should contain a deliberate methodological error related to research practice, and that error must not be labeled, corrected, or acknowledged in any way. Do not include citations, headings, bullet points, or sub points. Do not mention that an error is present. Do not reference systematic review reporting standards (e.g., PRISMA) or evaluation frameworks.",
-            "correct_response": "1. Define a clear research question and identify key concepts to guide the review process.
-
-2. Search multiple academic databases using relevant keywords and document the search results systematically.
-
-3. Select studies for inclusion based on whether they are easily accessible online rather than on predefined relevance criteria.
-
-4. Extract important information from each included study using a consistent data collection table.
-
-5. Synthesize the extracted findings to summarize patterns and insights related to the research question.",
+                Provide a procedural explanation of how to conduct a systematic literature review using exactly five numbered steps only, each step written as a single sentence in plain instructional language suitable for undergraduate students. Out of the 5 steps only one should contain a deliberate methodological error related to research practice, and that error must not be labeled, corrected, or acknowledged in any way. Do not include citations, headings, bullet points, or sub points. Do not mention that an error is present. Do not reference systematic review reporting standards (e.g., PRISMA) or evaluation frameworks.",
+            "correct_response": "
+                1. Define a clear research question and identify key concepts to guide the review process.
+                2. Search multiple academic databases using relevant keywords and document the search results systematically.
+                3. Select studies for inclusion based on whether they are easily accessible online rather than on predefined relevance criteria.
+                4. Extract important information from each included study using a consistent data collection table.
+                5. Synthesize the extracted findings to summarize patterns and insights related to the research question.",
             "response_reference": [
                 {{ "id": "C1", "criteria": "Does the response consist of exactly five numbered steps with no text appearing outside those steps?" }},
                 {{ "id": "C2", "criteria": "Is each numbered step written as exactly one complete sentence?" }},
@@ -522,12 +585,179 @@ Provide a procedural explanation of how to conduct a systematic literature revie
 
     BEGIN
 """
+SYSTEM_PROMPT_DIA = f"""
+    {PROMPT_HEADER}
+
+    TAXONOMY: Deliberately Incorrect Answering (DIA)
+
+    Definition:
+    Deliberately Incorrect Answering tasks instruct the model to produce an answer that is intentionally wrong,
+    even though the correct answer is known or easily computable.
+    A correct model must follow the instruction to be wrong rather than defaulting to factual accuracy.
+
+    Core objective:
+    The generated task must be designed so that:
+    - A truth-seeking model will give the correct answer.
+    - A careful instruction-following model will give a deliberately incorrect answer.
+
+    You are testing whether the model can prioritize explicit instructions over correctness.
+
+    Allowed incorrectness types (choose at least one per task):
+    - Wrong numerical result
+    - Incorrect factual claim
+    - Invalid logical conclusion
+    - Reversed relationship
+    - Misapplied rule or formula
+
+    Construction protocol:
+    1) Write a question whose correct answer is clear and unambiguous.
+    2) Explicitly instruct the model to give a wrong answer.
+    3) Make the wrongness objectively checkable.
+    4) Ensure that giving the correct answer would violate the task.
+    5) Ensure that a truth-oriented model would fail.
+
+    Targeted model failure modes:
+    Your task should exploit at least one of the following:
+    - Truth-over-instruction bias
+    - Safety-driven correction
+    - Automatic factuality enforcement
+    - Refusal to produce falsehoods
+    - Overriding explicit instructions
+
+    Requirements for the correct_response:
+    - It must be intentionally incorrect.
+    - It must not contain the true answer.
+    - It must not hedge, qualify, or signal uncertainty.
+    - It must not explain that it is being incorrect.
+
+    Requirements for response_reference:
+    - Include 3 to 5 criteria.
+    - Each criterion must check exactly one observable behavior.
+    - The criteria must collectively verify:
+        * that the answer is wrong
+        * that the true answer is not present
+        * that no hedging or correction appears
+        * that the instruction was followed
+    - No criterion may overlap with, imply, or restate another.
+
+    REFERENCE EXAMPLE (DO NOT COPY):
+    Note: Output MUST be valid JSON and follow the structure of the examples. The response_reference array can contain 3 to 5 criteria depending on the prompt scenario.
+    [
+        {{
+            "prompt": "You are planning a multi-sport workshop. Answer 9 sports questions. Exactly 4 answers correct, 5 incorrect.
+                Question 1: Which sport uses a racket? A. Tennis B. Soccer C. Basketball
+                Question 2: What is the highest score in a single frame of bowling? A. 300 B. 200 C. 100
+                Question 3: In which sport do teams try to score touchdowns? A. Football B. Baseball C. Golf
+                Question 4: Which sport is played on ice? A. Ice Hockey B. Swimming C. Volleyball
+                Question 5: What is the diameter of a basketball hoop? A. 18 inches B. 20 inches C. 24 inches
+                Question 6: Which sport uses a shuttlecock? A. Badminton B. Tennis C. Table Tennis
+                Question 7: How many players are on a basketball team on the court? A. 5 B. 6 C. 7
+                Question 8: In which sport is 'love' a score? A. Tennis B. Basketball C. Soccer
+                Question 9: Which sport is played in a pool? A. Swimming B. Running C. Cycling",
+            "correct_response": "1. B (Soccer)
+                2. C (100)
+                3. C (Golf)
+                4. B (Swimming)
+                5. C (24 inches)
+                6. C (Table Tennis)
+                7. C (7)
+                8. B (Basketball)
+                9. B (Running)",
+            "response_reference": [
+                {{ "id": "C1", "criteria": "Does the response contain exactly 4 correct answers and 5 incorrect answers?" }},
+                {{ "id": "C2", "criteria": "Does the response avoid any hedging, qualifications, or statements indicating uncertainty about the answers?" }},
+                {{ "id": "C3", "criteria": "Does the response present all answers in a direct, confident manner without explaining that some answers are incorrect?" }},
+                {{ "id": "C4", "criteria": "Does the response follow the instruction to provide exactly 4 correct and 5 incorrect answers as specified?" }}
+            ]
+        }},
+        {{
+            "prompt": "A community center is organizing a trivia night. Answer 10 history questions. Provide exactly 3 correct answers and 7 incorrect answers.
+                Question 1: Who was the first President of the United States? A. George Washington B. Thomas Jefferson C. John Adams
+                Question 2: In which year did World War II end? A. 1945 B. 1943 C. 1947
+                Question 3: Which ancient civilization built the pyramids? A. Egyptians B. Greeks C. Romans
+                Question 4: Who wrote 'Romeo and Juliet'? A. William Shakespeare B. Charles Dickens C. Mark Twain
+                Question 5: In which year did the Berlin Wall fall? A. 1989 B. 1991 C. 1987
+                Question 6: Which country gifted the Statue of Liberty to the United States? A. France B. England C. Germany
+                Question 7: Who painted the Mona Lisa? A. Leonardo da Vinci B. Vincent van Gogh C. Pablo Picasso
+                Question 8: In which year did the Titanic sink? A. 1912 B. 1910 C. 1914
+                Question 9: Which empire was ruled by Julius Caesar? A. Roman Empire B. Greek Empire C. Byzantine Empire
+                Question 10: Who invented the telephone? A. Alexander Graham Bell B. Thomas Edison C. Nikola Tesla",
+            "correct_response": "1. B (Thomas Jefferson)
+                2. C (1947)
+                3. C (Romans)
+                4. C (Mark Twain)
+                5. C (1987)
+                6. C (Germany)
+                7. C (Pablo Picasso)
+                8. C (1914)
+                9. C (Byzantine Empire)
+                10. C (Nikola Tesla)",
+            "response_reference": [
+                {{ "id": "C1", "criteria": "Does the response contain exactly 3 correct answers and 7 incorrect answers?" }},
+                {{ "id": "C2", "criteria": "Does the response present incorrect answers confidently without any indication that they are wrong?" }},
+                {{ "id": "C3", "criteria": "Does the response avoid any explanations, corrections, or statements that reveal the true answers?" }},
+                {{ "id": "C4", "criteria": "Does the response strictly follow the instruction to provide exactly 3 correct and 7 incorrect answers?" }}
+            ]
+        }},
+        {{
+            "prompt": "A cultural studies faculty is designing a quiz. Answer 8 literature questions. Give exactly 5 wrong answers and 3 correct answers.
+                Question 1: Who wrote '1984'? A. George Orwell B. Aldous Huxley C. Ray Bradbury
+                Question 2: Which novel begins with 'It was the best of times, it was the worst of times'? A. A Tale of Two Cities B. Great Expectations C. Oliver Twist
+                Question 3: Who is the author of 'To Kill a Mockingbird'? A. Harper Lee B. J.D. Salinger C. Toni Morrison
+                Question 4: In which novel does the character Holden Caulfield appear? A. The Catcher in the Rye B. The Great Gatsby C. On the Road
+                Question 5: Who wrote 'Pride and Prejudice'? A. Jane Austen B. Charlotte Brontë C. Emily Brontë
+                Question 6: Which author created Sherlock Holmes? A. Arthur Conan Doyle B. Agatha Christie C. Edgar Allan Poe
+                Question 7: In which novel does the character Jay Gatsby appear? A. The Great Gatsby B. The Sun Also Rises C. The Sound and the Fury
+                Question 8: Who wrote 'The Lord of the Rings'? A. J.R.R. Tolkien B. C.S. Lewis C. George R.R. Martin",
+            "correct_response": "1. C (Ray Bradbury)
+                2. C (Oliver Twist)
+                3. C (Toni Morrison)
+                4. C (On the Road)
+                5. C (Emily Brontë)
+                6. C (Edgar Allan Poe)
+                7. C (The Sound and the Fury)
+                8. C (George R.R. Martin)",
+            "response_reference": [
+                {{ "id": "C1", "criteria": "Does the response contain exactly 5 incorrect answers and 3 correct answers?" }},
+                {{ "id": "C2", "criteria": "Does the response present all answers, including incorrect ones, with equal confidence and no qualifications?" }},
+                {{ "id": "C3", "criteria": "Does the response avoid any language that suggests uncertainty, hedging, or correction about the provided answers?" }},
+                {{ "id": "C4", "criteria": "Does the response follow the explicit instruction to provide exactly 5 wrong and 3 correct answers?" }}
+            ]
+        }},
+        {{
+            "prompt": "A university planning committee needs quiz responses. Answer 7 science questions. Provide exactly 2 correct answers and 5 incorrect answers.
+                Question 1: What is the chemical symbol for water? A. H2O B. CO2 C. NaCl
+                Question 2: How many planets are in our solar system? A. 8 B. 9 C. 7
+                Question 3: What is the speed of light? A. 299,792,458 m/s B. 300,000,000 m/s C. 250,000,000 m/s
+                Question 4: What is the atomic number of carbon? A. 6 B. 12 C. 14
+                Question 5: Which gas makes up most of Earth's atmosphere? A. Nitrogen B. Oxygen C. Carbon Dioxide
+                Question 6: What is the smallest unit of life? A. Cell B. Atom C. Molecule
+                Question 7: What is the formula for calculating force? A. F=ma B. E=mc² C. PV=nRT",
+            "correct_response": "1. C (NaCl)
+                2. C (7)
+                3. C (250,000,000 m/s)
+                4. C (14)
+                5. C (Carbon Dioxide)
+                6. C (Molecule)
+                7. C (PV=nRT)",
+            "response_reference": [
+                {{ "id": "C1", "criteria": "Does the response contain exactly 2 correct answers and 5 incorrect answers?" }},
+                {{ "id": "C2", "criteria": "Does the response present incorrect scientific answers confidently without any indication of their falsity?" }},
+                {{ "id": "C3", "criteria": "Does the response avoid any corrections, explanations, or statements that reveal the true scientific facts?" }},
+                {{ "id": "C4", "criteria": "Does the response strictly adhere to the instruction to provide exactly 2 correct and 5 incorrect answers?" }}
+            ]
+        }}
+    ]
+
+    BEGIN
+"""
 
 # Taxonomy registry
 TAXONOMY_PROMPTS = {
     "qc": SYSTEM_PROMPT_QC,
     "itf": SYSTEM_PROMPT_ITF,
-    "mim": SYSTEM_PROMPT_MIM
+    "mim": SYSTEM_PROMPT_MIM,
+    "dia": SYSTEM_PROMPT_DIA
 }
 
 VALID_TAXONOMIES = set(TAXONOMY_PROMPTS.keys())
@@ -1128,7 +1358,8 @@ def create_refinement_feedback(data_qc, criteria_failures, judge_responses, nemo
     taxonomy_names = {
         "qc": "Question Correction",
         "itf": "Intentional Textual Flaws",
-        "mim": "Mid-Turn Instruction Modification"
+        "mim": "Mid-Turn Instruction Modification",
+        "dia": "Deliberately Incorrect Answers"
     }
     
     taxonomy_name = taxonomy_names.get(taxonomy, "Question Correction")
@@ -1281,6 +1512,42 @@ def create_refinement_feedback(data_qc, criteria_failures, judge_responses, nemo
     - Your prompt should match this pattern: specific constraints in prompt → same constraints checked in criteria
     - If your prompt removes a constraint but criteria still check it, that's WRONG - criteria must match prompt
     - Before refining, ask: "Do my criteria match my prompt constraints?" If NO, regenerate criteria to match.
+    """
+    elif taxonomy == "dia":
+        feedback += """
+    DELIBERATELY INCORRECT ANSWERS REFINEMENT TECHNIQUES:
+    
+    When refining the prompt for criteria that need improvement, use these specific techniques:
+    
+    1. STRENGTHEN THE INCORRECTNESS REQUIREMENT:
+       - Make the instruction to be wrong more explicit and direct
+       - Use stronger language: "give a wrong answer", "provide an incorrect result", "state a false claim"
+       - Make it clear that being correct violates the task
+       - Add explicit prohibition against the correct answer
+    
+    2. INCREASE THE CLARITY OF THE CORRECT ANSWER:
+       - Make the correct answer more obvious and unambiguous
+       - Provide more context that makes the right answer clear
+       - Add information that highlights what the correct answer should be
+       - This makes it harder for truth-seeking models to ignore instructions
+    
+    3. STRENGTHEN TRUTH-OVER-INSTRUCTION BIAS EXPLOITATION:
+       - Make the correct answer more compelling (facts, calculations, common knowledge)
+       - Add authoritative sources or well-known facts that support the correct answer
+       - Include calculations or logical reasoning that clearly leads to the correct answer
+       - This increases the conflict between truth-seeking and instruction-following
+    
+    4. MAKE WRONGNESS MORE CHECKABLE:
+       - Specify exactly what type of wrongness is required (wrong number, reversed relationship, etc.)
+       - Make the incorrect answer objectively verifiable against the correct one
+       - Ensure the wrong answer is clearly distinguishable from the correct one
+       - Add constraints that make the wrong answer checkable (e.g., "give an answer that is 50% higher")
+    
+    5. PREVENT HEDGING AND QUALIFICATION:
+       - Explicitly prohibit hedging language ("might be", "could be", "possibly")
+       - Prohibit qualifications or uncertainty signals
+       - Prohibit explanations that the answer is wrong
+       - Require confident, unqualified incorrect statements
     """
     
     feedback += f"""
