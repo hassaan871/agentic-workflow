@@ -1,7 +1,7 @@
 import pandas as pd
 
 # Read CSV
-df = pd.read_csv("mim_data.csv")
+df = pd.read_csv("new_qc_data_20260112_203447.csv")
 
 # Write to Excel
-df.to_excel("mim_data.xlsx", index=False)
+df.to_excel("new_qc_data_20260112_203447.xlsx", index=False)
